@@ -1,5 +1,5 @@
+import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from .const import DOMAIN, CONF_DEVICE_NAME, CONF_FS_NAME, CONF_USE_FS_LOCK
 
 class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -12,11 +12,11 @@ class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             return self.async_show_form(
                 step_id="user",
-                data_schema=self.hass.data["voluptuous"].Schema(
+                data_schema=vol.Schema(
                     {
-                        self.hass.data["voluptuous"].Required(CONF_DEVICE_NAME): str,
-                        self.hass.data["voluptuous"].Optional(CONF_FS_NAME): str,
-                        self.hass.data["voluptuous"].Optional(CONF_USE_FS_LOCK, default=False): bool,
+                        vol.Required(CONF_DEVICE_NAME): str,
+                        vol.Optional(CONF_FS_NAME): str,
+                        vol.Optional(CONF_USE_FS_LOCK, default=False): bool,
                     }
                 ),
             )
