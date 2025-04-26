@@ -2,12 +2,16 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.components.mqtt import subscription
 from .const import DOMAIN, SERVICE_SET_VOLUME, SERVICE_MUTE, SERVICE_LOCK
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SWITCH]
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the PC component."""
+    hass.data.setdefault(DOMAIN, {})
+    return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
