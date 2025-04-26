@@ -1,18 +1,21 @@
 import logging
 import json
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import STATE_ON, STATE_OFF
+from homeassistant.const import STATE_ON, STATE_OFF, SERVICE_TURN_ON, SERVICE_TURN_OFF
 from homeassistant.helpers import device_registry as dr
-from homeassistant.components.mqtt import subscription
 from homeassistant.components import mqtt
-from .const import DOMAIN, CONF_DEVICE_NAME, ATTR_VOLUME_LEVEL, ATTR_ACTIVE_WINDOW, ATTR_SESSION_STATE
+from .const import (
+    DOMAIN, CONF_DEVICE_NAME, CONF_FS_NAME, CONF_USE_FS_LOCK,
+    ATTR_VOLUME_LEVEL, ATTR_ACTIVE_WINDOW, ATTR_SESSION_STATE,
+    FS_BLOCK_WINDOWS, FS_BLOCK_XBOX
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the PC device from a config entry."""
     device_name = config_entry.data[CONF_DEVICE_NAME]
-    entity = PCDevice(hass, config_entry.entry_id, device_name)
+    entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
     async_add_entities([entity])
 
     # Register the device in the device registry
@@ -42,13 +45,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class PCDevice(SwitchEntity):
     """Representation of a PC device."""
 
-    def __init__(self, hass, entry_id, device_name):
+    def __init__(self, hass, entry_id, config):
         """Initialize the PC device."""
         self.hass = hass
         self._entry_id = entry_id
-        self._device_name = device_name
-        self._attr_unique_id = f"pc_{device_name.lower()}"
-        self._attr_name = f"PC {device_name}"
+        self._device_name = config[CONF_DEVICE_NAME]
+        self._fs_name = config.get(CONF_FS_NAME, "")
+        self._use_fs_lock = config.get(CONF_USE_FS_LOCK, False)
+        self._attr_unique_id = f"pc_{self._device_name.lower()}"
+        self._attr_name = f"PC {self._device_name}"
         self._state = STATE_ON
         self._attributes = {
             ATTR_VOLUME_LEVEL: 0.5,
@@ -56,8 +61,8 @@ class PCDevice(SwitchEntity):
             ATTR_SESSION_STATE: "unlocked"
         }
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, device_name.lower())},
-            "name": f"PC {device_name}",
+            "identifiers": {(DOMAIN, self._device_name.lower())},
+            "name": f"PC {self._device_name}",
             "manufacturer": "Home Assistant",
             "model": "PC"
         }
@@ -74,13 +79,40 @@ class PCDevice(SwitchEntity):
         """Turn the PC on."""
         self._state = STATE_ON
         self._attributes[ATTR_SESSION_STATE] = "unlocked"
+
+        # If using Family Safety lock, turn off the block switches
+        if self._use_fs_lock and self._fs_name:
+            for block_type in [FS_BLOCK_WINDOWS, FS_BLOCK_XBOX]:
+                switch_entity = f"switch.{self._fs_name.lower()}_block_{block_type}"
+                await self.hass.services.async_call(
+                    "switch", SERVICE_TURN_OFF,
+                    {"entity_id": switch_entity},
+                    blocking=True
+                )
+
         await self._publish_state()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         """Turn the PC off."""
-        self._state = STATE_OFF
-        self._attributes[ATTR_SESSION_STATE] = "locked"
+        if self._use_fs_lock and self._fs_name:
+            # Use Family Safety lock instead of power off
+            self._state = STATE_OFF
+            self._attributes[ATTR_SESSION_STATE] = "locked"
+
+            # Turn on the block switches
+            for block_type in [FS_BLOCK_WINDOWS, FS_BLOCK_XBOX]:
+                switch_entity = f"switch.{self._fs_name.lower()}_block_{block_type}"
+                await self.hass.services.async_call(
+                    "switch", SERVICE_TURN_ON,
+                    {"entity_id": switch_entity},
+                    blocking=True
+                )
+        else:
+            # Default power off behavior
+            self._state = STATE_OFF
+            self._attributes[ATTR_SESSION_STATE] = "locked"
+
         await self._publish_state()
         self.async_write_ha_state()
 
@@ -92,8 +124,6 @@ class PCDevice(SwitchEntity):
 
     async def async_mute(self):
         """Mute or unmute the PC."""
-        # For simplicity, we'll just log this action
-        # In a real implementation, you might toggle a mute state
         _LOGGER.info(f"Muting PC {self._device_name}")
         await self._publish_state()
         self.async_write_ha_state()
