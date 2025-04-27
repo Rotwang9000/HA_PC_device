@@ -4,12 +4,9 @@ from .const import (
     DOMAIN, CONF_DEVICE_NAME, CONF_FS_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
     CONF_ENFORCE_LOCK,
-    POWER_ON_ACTIONS, POWER_OFF_ACTIONS
+    POWER_ON_POWER, POWER_ON_ACTIONS,  # Import the missing constants
+    POWER_OFF_ACTIONS
 )
-
-# Remove Family Safety options from actions
-POWER_ON_ACTIONS.remove("fs_unlock")
-POWER_OFF_ACTIONS.remove("fs_lock")
 
 class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for PC Device."""
