@@ -6,7 +6,7 @@ from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
-from .const import (  # Fix the import path: use .const instead of ..const
+from .const import (
     DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION, CONF_ENFORCE_LOCK,
     POWER_ON_POWER, POWER_ON_WAKE,
@@ -18,19 +18,29 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the PC device from a config entry."""
+    _LOGGER.debug(f"Setting up PC device for config entry: {config_entry.entry_id}")
     device_name = config_entry.data[CONF_DEVICE_NAME]
-    entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
-    async_add_entities([entity])
+    _LOGGER.debug(f"Device name: {device_name}")
+    
+    try:
+        entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
+        _LOGGER.debug(f"Created PCDevice entity: {entity._attr_unique_id}")
+        async_add_entities([entity])
+        _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
+    except Exception as e:
+        _LOGGER.error(f"Failed to create PCDevice entity: {e}")
+        raise
 
     # Register the device in the device registry
     device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
+    device_entry = device_registry.async_get_or_create(
         config_entry_id=config_entry.entry_id,
         identifiers={(DOMAIN, device_name.lower())},
         name=f"PC {device_name}",
         manufacturer="Home Assistant",
         model="PC"
     )
+    _LOGGER.debug(f"Registered device in device registry: {device_entry.id}")
 
     # Subscribe to MQTT topics
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
@@ -55,6 +65,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     await mqtt.async_subscribe(hass, set_topic, message_received)
     await mqtt.async_subscribe(hass, enforce_lock_topic, message_received)
+    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {enforce_lock_topic}")
 
 class PCDevice(SwitchEntity):
     """Representation of a PC device."""
