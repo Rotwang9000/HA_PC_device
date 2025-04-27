@@ -6,7 +6,7 @@ from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
-from ..const import (
+from .const import (  # Fix the import path: use .const instead of ..const
     DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION, CONF_ENFORCE_LOCK,
     POWER_ON_POWER, POWER_ON_WAKE,
@@ -89,7 +89,7 @@ class PCDevice(SwitchEntity):
         """Set up tracking for session state changes."""
         async_track_state_change_event(
             self.hass,
-            [self.entity_id],  # Use the entity's actual entity_id
+            [self.entity_id],
             self._handle_state_change
         )
 
