@@ -4,8 +4,8 @@ from .const import (
     DOMAIN, CONF_DEVICE_NAME, CONF_FS_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
     CONF_ENFORCE_LOCK,
-    POWER_ON_POWER, POWER_ON_ACTIONS,  # Import the missing constants
-    POWER_OFF_ACTIONS
+    POWER_ON_POWER, POWER_ON_ACTIONS,
+    POWER_OFF_POWER, POWER_OFF_ACTIONS
 )
 
 class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
