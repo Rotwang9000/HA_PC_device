@@ -92,8 +92,11 @@ class PCDevice(SwitchEntity):
             "model": "PC"
         }
 
-        # Track state changes to enforce lock
+    async def async_added_to_hass(self):
+        """Run when the entity is added to Home Assistant."""
+        await super().async_added_to_hass()
         self._setup_state_tracking()
+        _LOGGER.debug(f"State tracking set up for entity {self.entity_id}")
 
     def _setup_state_tracking(self):
         """Set up tracking for session state changes."""
