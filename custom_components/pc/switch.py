@@ -7,7 +7,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
 from ..const import (
-    DOMAIN, CONF_DEVICE_NAME, CONF_FS_NAME,
+    DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION, CONF_ENFORCE_LOCK,
     POWER_ON_POWER, POWER_ON_WAKE,
     POWER_OFF_POWER, POWER_OFF_HIBERNATE, POWER_OFF_SLEEP,
@@ -38,17 +38,20 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     enforce_lock_topic = f"homeassistant/PC/PC.{device_name}/enforce_lock"
 
     async def message_received(msg):
-        payload = msg.payload
+        try:
+            payload = msg.payload.decode("utf-8") if isinstance(msg.payload, bytes) else str(msg.payload)
+        except (AttributeError, UnicodeDecodeError) as e:
+            _LOGGER.error(f"Failed to decode MQTT payload for {msg.topic}: {e}")
+            return
+
         if msg.topic == set_topic:
-            if payload == "ON":
+            if payload.upper() == "ON":
                 await entity.async_turn_on()
-            elif payload == "OFF":
+            elif payload.upper() == "OFF":
                 await entity.async_turn_off()
         elif msg.topic == enforce_lock_topic:
-            if payload.lower() == "true":
-                entity.set_enforce_lock(True)
-            elif payload.lower() == "false":
-                entity.set_enforce_lock(False)
+            enabled = payload.lower() == "true"
+            entity.set_enforce_lock(enabled)
 
     await mqtt.async_subscribe(hass, set_topic, message_received)
     await mqtt.async_subscribe(hass, enforce_lock_topic, message_received)
@@ -61,7 +64,6 @@ class PCDevice(SwitchEntity):
         self.hass = hass
         self._entry_id = entry_id
         self._device_name = config[CONF_DEVICE_NAME]
-        self._fs_name = config.get(CONF_FS_NAME, "")
         self._power_on_action = config[CONF_POWER_ON_ACTION]
         self._power_off_action = config[CONF_POWER_OFF_ACTION]
         self._enforce_lock = config.get(CONF_ENFORCE_LOCK, False)
@@ -87,7 +89,7 @@ class PCDevice(SwitchEntity):
         """Set up tracking for session state changes."""
         async_track_state_change_event(
             self.hass,
-            [f"switch.pc_{self._device_name.lower()}"],
+            [self.entity_id],  # Use the entity's actual entity_id
             self._handle_state_change
         )
 
@@ -184,4 +186,8 @@ class PCDevice(SwitchEntity):
             ATTR_SESSION_STATE: self._attributes[ATTR_SESSION_STATE]
         }
         topic = f"homeassistant/PC/PC.{self._device_name}/update"
-        await mqtt.async_publish(self.hass, topic, json.dumps(payload))
+        try:
+            payload_str = json.dumps(payload)
+            await mqtt.async_publish(self.hass, topic, payload_str)
+        except (TypeError, ValueError) as e:
+            _LOGGER.error(f"Failed to serialize state to JSON for {topic}: {e}")
