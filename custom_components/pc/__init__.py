@@ -3,11 +3,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.loader import async_get_integration
-from .const import DOMAIN, SERVICE_SET_VOLUME, SERVICE_MUTE, SERVICE_LOCK
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SWITCH]
+PLATFORMS = [Platform.MEDIA_PLAYER]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the PC component."""
@@ -23,38 +23,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     integration = await async_get_integration(hass, DOMAIN)
     _LOGGER.debug(f"Integration {DOMAIN} loaded: {integration}")
 
-    # Forward the setup to the switch platform
+    # Forward the setup to the media_player platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Register custom services
-    async def handle_set_volume(call):
-        entity_id = call.data.get("entity_id")
-        volume_level = call.data.get("volume_level")
-        entity = hass.states.get(entity_id)
-        if entity:
-            await entity.async_set_volume(volume_level)
-        else:
-            _LOGGER.error(f"Entity {entity_id} not found for set_volume service")
-
-    async def handle_mute(call):
-        entity_id = call.data.get("entity_id")
-        entity = hass.states.get(entity_id)
-        if entity:
-            await entity.async_mute()
-        else:
-            _LOGGER.error(f"Entity {entity_id} not found for mute service")
-
-    async def handle_lock(call):
-        entity_id = call.data.get("entity_id")
-        entity = hass.states.get(entity_id)
-        if entity:
-            await entity.async_toggle_enforce_lock()
-        else:
-            _LOGGER.error(f"Entity {entity_id} not found for lock service")
-
-    hass.services.async_register(DOMAIN, SERVICE_SET_VOLUME, handle_set_volume)
-    hass.services.async_register(DOMAIN, SERVICE_MUTE, handle_mute)
-    hass.services.async_register(DOMAIN, SERVICE_LOCK, handle_lock)
 
     return True
 
