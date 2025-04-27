@@ -1,7 +1,7 @@
-"""Switch platform for PC Device integration."""
+"""Media player platform for PC Device integration."""
 import logging
 import json
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerState
 from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
@@ -24,7 +24,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     
     try:
         entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
-        _LOGGER.debug(f"Created PCDevice entity: {entity._attr_unique_id}")
         async_add_entities([entity])
         _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
     except Exception as e:
@@ -46,6 +45,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
     update_topic = f"homeassistant/PC/PC.{device_name}/update"
     lock_topic = f"homeassistant/PC/PC.{device_name}/lock"
+    mute_topic = f"homeassistant/PC/PC.{device_name}/mute"
+    setvolume_topic = f"homeassistant/PC/PC.{device_name}/setvolume"
 
     async def message_received(msg):
         try:
@@ -61,13 +62,23 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 await entity.async_turn_off()
         elif msg.topic == lock_topic:
             await entity.async_toggle_enforce_lock()
+        elif msg.topic == mute_topic:
+            await entity.async_toggle_mute()
+        elif msg.topic == setvolume_topic:
+            try:
+                volume = float(payload)
+                await entity.async_set_volume_level(volume)
+            except ValueError as e:
+                _LOGGER.error(f"Invalid volume value received: {payload}, error: {e}")
 
     await mqtt.async_subscribe(hass, set_topic, message_received)
     await mqtt.async_subscribe(hass, lock_topic, message_received)
-    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}")
+    await mqtt.async_subscribe(hass, mute_topic, message_received)
+    await mqtt.async_subscribe(hass, setvolume_topic, message_received)
+    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
 
-class PCDevice(SwitchEntity):
-    """Representation of a PC device."""
+class PCDevice(MediaPlayerEntity):
+    """Representation of a PC device as a media player."""
 
     def __init__(self, hass, entry_id, config):
         """Initialize the PC device."""
@@ -77,13 +88,15 @@ class PCDevice(SwitchEntity):
         self._power_on_action = config[CONF_POWER_ON_ACTION]
         self._power_off_action = config[CONF_POWER_OFF_ACTION]
         self._enforce_lock = False  # Default to False, toggled via lock command
+        self._muted = False  # Default to unmuted
         self._attr_unique_id = f"pc_{self._device_name.lower()}"
         self._attr_name = f"PC {self._device_name}"
-        self._state = STATE_ON
+        self._state = MediaPlayerState.ON
         self._attributes = {
             ATTR_VOLUME_LEVEL: 0.5,
             ATTR_ACTIVE_WINDOW: "Notepad",
-            ATTR_SESSION_STATE: "unlocked"
+            ATTR_SESSION_STATE: "unlocked",
+            "enforce_lock": self._enforce_lock
         }
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._device_name.lower())},
@@ -91,6 +104,12 @@ class PCDevice(SwitchEntity):
             "manufacturer": "Home Assistant",
             "model": "PC"
         }
+        self._attr_supported_features = (
+            MediaPlayerEntity.SUPPORT_TURN_ON
+            | MediaPlayerEntity.SUPPORT_TURN_OFF
+            | MediaPlayerEntity.SUPPORT_VOLUME_SET
+            | MediaPlayerEntity.SUPPORT_VOLUME_MUTE
+        )
 
     async def async_added_to_hass(self):
         """Run when the entity is added to Home Assistant."""
@@ -121,22 +140,35 @@ class PCDevice(SwitchEntity):
             self.async_write_ha_state()
 
     @property
-    def is_on(self):
-        return self._state == STATE_ON
+    def state(self):
+        """Return the state of the media player."""
+        return self._state
+
+    @property
+    def volume_level(self):
+        """Return the volume level of the media player (0..1)."""
+        return self._attributes[ATTR_VOLUME_LEVEL]
+
+    @property
+    def is_volume_muted(self):
+        """Return true if volume is muted."""
+        return self._muted
 
     @property
     def extra_state_attributes(self):
+        """Return device specific state attributes."""
+        self._attributes["enforce_lock"] = self._enforce_lock
         return self._attributes
 
     async def async_turn_on(self, **kwargs):
         """Turn the PC on based on the configured action."""
         if self._power_on_action == POWER_ON_POWER:
             _LOGGER.info(f"Powering on PC {self._device_name}")
-            self._state = STATE_ON
+            self._state = MediaPlayerState.ON
             self._attributes[ATTR_SESSION_STATE] = "unlocked"
         elif self._power_on_action == POWER_ON_WAKE:
             _LOGGER.info(f"Sending wake command to PC {self._device_name}")
-            self._state = STATE_ON
+            self._state = MediaPlayerState.ON
             self._attributes[ATTR_SESSION_STATE] = "unlocked"
 
         # Enforce lock if active
@@ -151,31 +183,36 @@ class PCDevice(SwitchEntity):
         """Turn the PC off based on the configured action."""
         if self._power_off_action == POWER_OFF_POWER:
             _LOGGER.info(f"Powering off PC {self._device_name}")
-            self._state = STATE_OFF
+            self._state = MediaPlayerState.OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
         elif self._power_off_action == POWER_OFF_HIBERNATE:
             _LOGGER.info(f"Hibernating PC {self._device_name}")
-            self._state = STATE_OFF
+            self._state = MediaPlayerState.OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
         elif self._power_off_action == POWER_OFF_SLEEP:
             _LOGGER.info(f"Sleeping PC {self._device_name}")
-            self._state = STATE_OFF
+            self._state = MediaPlayerState.OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
 
         await self._publish_state()
         self.async_write_ha_state()
 
-    async def async_set_volume(self, volume_level):
-        """Set the volume of the PC."""
-        self._attributes[ATTR_VOLUME_LEVEL] = float(volume_level)
+    async def async_set_volume_level(self, volume):
+        """Set the volume level of the PC."""
+        self._attributes[ATTR_VOLUME_LEVEL] = float(volume)
         await self._publish_state()
         self.async_write_ha_state()
 
-    async def async_mute(self):
+    async def async_mute_volume(self, mute):
         """Mute or unmute the PC."""
-        _LOGGER.info(f"Muting PC {self._device_name}")
+        self._muted = mute
+        _LOGGER.info(f"{'Muting' if mute else 'Unmuting'} PC {self._device_name}")
         await self._publish_state()
         self.async_write_ha_state()
+
+    async def async_toggle_mute(self):
+        """Toggle mute state."""
+        await self.async_mute_volume(not self._muted)
 
     async def async_toggle_enforce_lock(self):
         """Toggle the enforced lock state."""
@@ -188,7 +225,7 @@ class PCDevice(SwitchEntity):
 
     async def _publish_state(self):
         """Publish the current state to the MQTT update topic."""
-        state = self._state
+        state = "ON" if self._state == MediaPlayerState.ON else "OFF"
         payload = {
             "entity_id": f"PC.{self._device_name}",
             "state": state,
