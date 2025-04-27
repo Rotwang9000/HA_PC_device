@@ -16,18 +16,8 @@ mute:
       example: "pc.felixlaptop"
 
 lock:
-  description: Locks the PC.
+  description: Toggles the enforced lock for the PC (enables/disables automatic re-locking).
   fields:
     entity_id:
       description: The entity ID of the PC.
       example: "pc.felixlaptop"
-
-enforce_lock:
-  description: Enables or disables the enforced lock for the PC.
-  fields:
-    entity_id:
-      description: The entity ID of the PC.
-      example: "pc.felixlaptop"
-    enabled:
-      description: Whether to enable or disable the enforced lock.
-      example: true
