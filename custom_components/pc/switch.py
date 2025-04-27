@@ -8,7 +8,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
 from .const import (
     DOMAIN, CONF_DEVICE_NAME,
-    CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION, CONF_ENFORCE_LOCK,
+    CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
     POWER_ON_POWER, POWER_ON_WAKE,
     POWER_OFF_POWER, POWER_OFF_HIBERNATE, POWER_OFF_SLEEP,
     ATTR_VOLUME_LEVEL, ATTR_ACTIVE_WINDOW, ATTR_SESSION_STATE
@@ -45,7 +45,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # Subscribe to MQTT topics
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
     update_topic = f"homeassistant/PC/PC.{device_name}/update"
-    enforce_lock_topic = f"homeassistant/PC/PC.{device_name}/enforce_lock"
+    lock_topic = f"homeassistant/PC/PC.{device_name}/lock"
 
     async def message_received(msg):
         try:
@@ -59,13 +59,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 await entity.async_turn_on()
             elif payload.upper() == "OFF":
                 await entity.async_turn_off()
-        elif msg.topic == enforce_lock_topic:
-            enabled = payload.lower() == "true"
-            entity.set_enforce_lock(enabled)
+        elif msg.topic == lock_topic:
+            await entity.async_toggle_enforce_lock()
 
     await mqtt.async_subscribe(hass, set_topic, message_received)
-    await mqtt.async_subscribe(hass, enforce_lock_topic, message_received)
-    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {enforce_lock_topic}")
+    await mqtt.async_subscribe(hass, lock_topic, message_received)
+    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}")
 
 class PCDevice(SwitchEntity):
     """Representation of a PC device."""
@@ -77,7 +76,7 @@ class PCDevice(SwitchEntity):
         self._device_name = config[CONF_DEVICE_NAME]
         self._power_on_action = config[CONF_POWER_ON_ACTION]
         self._power_off_action = config[CONF_POWER_OFF_ACTION]
-        self._enforce_lock = config.get(CONF_ENFORCE_LOCK, False)
+        self._enforce_lock = False  # Default to False, toggled via lock command
         self._attr_unique_id = f"pc_{self._device_name.lower()}"
         self._attr_name = f"PC {self._device_name}"
         self._state = STATE_ON
@@ -114,7 +113,9 @@ class PCDevice(SwitchEntity):
         session_state = new_state.attributes.get(ATTR_SESSION_STATE, "unlocked")
         if self._enforce_lock and session_state == "unlocked":
             _LOGGER.info(f"Enforced lock active: Re-locking PC {self._device_name}")
-            await self.async_lock()
+            self._attributes[ATTR_SESSION_STATE] = "locked"
+            await self._publish_state()
+            self.async_write_ha_state()
 
     @property
     def is_on(self):
@@ -138,7 +139,7 @@ class PCDevice(SwitchEntity):
         # Enforce lock if active
         if self._enforce_lock:
             _LOGGER.info(f"Enforced lock active: Locking PC {self._device_name} after turn on")
-            await self.async_lock()
+            self._attributes[ATTR_SESSION_STATE] = "locked"
 
         await self._publish_state()
         self.async_write_ha_state()
@@ -173,18 +174,14 @@ class PCDevice(SwitchEntity):
         await self._publish_state()
         self.async_write_ha_state()
 
-    async def async_lock(self):
-        """Lock the PC."""
-        self._attributes[ATTR_SESSION_STATE] = "locked"
+    async def async_toggle_enforce_lock(self):
+        """Toggle the enforced lock state."""
+        self._enforce_lock = not self._enforce_lock
+        _LOGGER.info(f"Enforced lock for PC {self._device_name} set to {self._enforce_lock}")
+        if self._enforce_lock and self._attributes[ATTR_SESSION_STATE] == "unlocked":
+            self._attributes[ATTR_SESSION_STATE] = "locked"
         await self._publish_state()
         self.async_write_ha_state()
-
-    def set_enforce_lock(self, enabled):
-        """Enable or disable the enforced lock."""
-        self._enforce_lock = enabled
-        _LOGGER.info(f"Enforced lock for PC {self._device_name} set to {enabled}")
-        if self._enforce_lock and self._attributes[ATTR_SESSION_STATE] == "unlocked":
-            self.hass.async_create_task(self.async_lock())
 
     async def _publish_state(self):
         """Publish the current state to the MQTT update topic."""
