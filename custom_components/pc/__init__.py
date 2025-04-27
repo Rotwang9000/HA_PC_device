@@ -2,7 +2,7 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from .const import DOMAIN, SERVICE_SET_VOLUME, SERVICE_MUTE, SERVICE_LOCK, SERVICE_ENFORCE_LOCK
+from .const import DOMAIN, SERVICE_SET_VOLUME, SERVICE_MUTE, SERVICE_LOCK
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,23 +43,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_id = call.data.get("entity_id")
         entity = hass.states.get(entity_id)
         if entity:
-            await entity.async_lock()
+            await entity.async_toggle_enforce_lock()
         else:
             _LOGGER.error(f"Entity {entity_id} not found for lock service")
-
-    async def handle_enforce_lock(call):
-        entity_id = call.data.get("entity_id")
-        enabled = call.data.get("enabled", False)
-        entity = hass.states.get(entity_id)
-        if entity:
-            entity.set_enforce_lock(enabled)
-        else:
-            _LOGGER.error(f"Entity {entity_id} not found for enforce_lock service")
 
     hass.services.async_register(DOMAIN, SERVICE_SET_VOLUME, handle_set_volume)
     hass.services.async_register(DOMAIN, SERVICE_MUTE, handle_mute)
     hass.services.async_register(DOMAIN, SERVICE_LOCK, handle_lock)
-    hass.services.async_register(DOMAIN, SERVICE_ENFORCE_LOCK, handle_enforce_lock)
 
     return True
 
