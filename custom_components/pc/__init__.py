@@ -2,6 +2,7 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
+from homeassistant.loader import async_get_integration
 from .const import DOMAIN, SERVICE_SET_VOLUME, SERVICE_MUTE, SERVICE_LOCK
 
 _LOGGER = logging.getLogger(__name__)
@@ -17,6 +18,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    # Ensure the integration is loaded asynchronously
+    integration = await async_get_integration(hass, DOMAIN)
+    _LOGGER.debug(f"Integration {DOMAIN} loaded: {integration}")
 
     # Forward the setup to the switch platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
