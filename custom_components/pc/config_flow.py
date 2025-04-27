@@ -1,9 +1,8 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from .const import (
-    DOMAIN, CONF_DEVICE_NAME,  # Removed CONF_FS_NAME
+    DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
-    CONF_ENFORCE_LOCK,
     POWER_ON_POWER, POWER_ON_ACTIONS,
     POWER_OFF_POWER, POWER_OFF_ACTIONS
 )
@@ -32,7 +31,6 @@ class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_DEVICE_NAME: device_name,
                         CONF_POWER_ON_ACTION: user_input[CONF_POWER_ON_ACTION],
                         CONF_POWER_OFF_ACTION: user_input[CONF_POWER_OFF_ACTION],
-                        CONF_ENFORCE_LOCK: user_input.get(CONF_ENFORCE_LOCK, False),
                     },
                 )
 
@@ -43,7 +41,6 @@ class PCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_DEVICE_NAME): str,
                     vol.Required(CONF_POWER_ON_ACTION, default=POWER_ON_POWER): vol.In(POWER_ON_ACTIONS),
                     vol.Required(CONF_POWER_OFF_ACTION, default=POWER_OFF_POWER): vol.In(POWER_OFF_ACTIONS),
-                    vol.Optional(CONF_ENFORCE_LOCK, default=False): bool,
                 }
             ),
             errors=errors,
