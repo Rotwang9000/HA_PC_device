@@ -28,18 +28,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity = hass.states.get(entity_id)
         if entity:
             await entity.async_set_volume(volume_level)
+        else:
+            _LOGGER.error(f"Entity {entity_id} not found for set_volume service")
 
     async def handle_mute(call):
         entity_id = call.data.get("entity_id")
         entity = hass.states.get(entity_id)
         if entity:
             await entity.async_mute()
+        else:
+            _LOGGER.error(f"Entity {entity_id} not found for mute service")
 
     async def handle_lock(call):
         entity_id = call.data.get("entity_id")
         entity = hass.states.get(entity_id)
         if entity:
             await entity.async_lock()
+        else:
+            _LOGGER.error(f"Entity {entity_id} not found for lock service")
 
     async def handle_enforce_lock(call):
         entity_id = call.data.get("entity_id")
@@ -47,6 +53,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity = hass.states.get(entity_id)
         if entity:
             entity.set_enforce_lock(enabled)
+        else:
+            _LOGGER.error(f"Entity {entity_id} not found for enforce_lock service")
 
     hass.services.async_register(DOMAIN, SERVICE_SET_VOLUME, handle_set_volume)
     hass.services.async_register(DOMAIN, SERVICE_MUTE, handle_mute)
