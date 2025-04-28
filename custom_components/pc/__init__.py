@@ -75,7 +75,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug(f"Integration {DOMAIN} loaded: {integration}")
 
     # Forward the setup to the pc platform
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception as e:
+        _LOGGER.error(f"Failed to setup entry {entry.entry_id}: {str(e)}")
+        _LOGGER.error(f"Current entry state: {entry.state}")
+        _LOGGER.error("To fix this issue, please remove this integration through the UI and add it again.")
+        # Clear our data for this entry
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        return False
 
     return True
 
