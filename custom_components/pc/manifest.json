@@ -1,7 +1,7 @@
 {
   "domain": "pc",
   "name": "PC Device",
-  "version": "1.0.11",
+  "version": "1.0.14",
   "documentation": "https://github.com/Rotwang9000/HA_PC_device#readme",
   "requirements": [],
   "dependencies": ["mqtt"],
