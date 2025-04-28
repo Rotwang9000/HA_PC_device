@@ -137,11 +137,22 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 				if isinstance(entities, dict) and "main" in entities:
 					if entities["main"].entity_id == entity_id:
 						await entities["main"].async_toggle_enforce_lock()
+						if "enforce_lock" in entities:
+							await entities["enforce_lock"].async_update_state()
 						if "lock" in entities:
 							await entities["lock"].async_update_state()
 						return
 					elif "lock" in entities and entities["lock"].entity_id == entity_id:
 						await entities["lock"].async_press()
+						if "enforce_lock" in entities:
+							await entities["enforce_lock"].async_update_state()
+						return
+					elif "enforce_lock" in entities and entities["enforce_lock"].entity_id == entity_id:
+						current_state = entities["enforce_lock"].is_on
+						if current_state:
+							await entities["enforce_lock"].async_turn_off()
+						else:
+							await entities["enforce_lock"].async_turn_on()
 						return
 			
 			# If not found in the new structure, try the old structure
@@ -197,14 +208,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 		component = EntityComponent(_LOGGER, DOMAIN, hass)
 		
 		# Create the entity directly
-		from .computer import ComputerDevice, ComputerVolumeEntity, ComputerMuteEntity, ComputerLockButton
+		from .computer import ComputerDevice, ComputerVolumeEntity, ComputerMuteEntity, ComputerLockButton, ComputerEnforceLockSwitch
 		entity = ComputerDevice(hass, entry.entry_id, entry.data)
 		volume_entity = ComputerVolumeEntity(hass, entry.entry_id, entry.data, entity)
 		mute_entity = ComputerMuteEntity(hass, entry.entry_id, entry.data, entity)
-		lock_entity = ComputerLockButton(hass, entry.entry_id, entry.data, entity)
+		lock_button = ComputerLockButton(hass, entry.entry_id, entry.data, entity)
+		enforce_lock_entity = ComputerEnforceLockSwitch(hass, entry.entry_id, entry.data, entity)
 		
 		# Add entity to Home Assistant through the component
-		await component.async_add_entities([entity, volume_entity, mute_entity, lock_entity])
+		await component.async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
 		
 		# Store the entity for MQTT control
 		hass.data.setdefault(DOMAIN, {})
@@ -214,7 +226,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 			"main": entity,
 			"volume": volume_entity, 
 			"mute": mute_entity,
-			"lock": lock_entity
+			"lock": lock_button,
+			"enforce_lock": enforce_lock_entity
 		}
 
 		# Create the dict for entry.entry_id if it doesn't exist
@@ -245,7 +258,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 						await entity.async_turn_off()
 				elif msg.topic == lock_topic:
 					await entity.async_toggle_enforce_lock()
-					await lock_entity.async_update_state()
+					await enforce_lock_entity.async_update_state()
 				elif msg.topic == mute_topic:
 					await entity.async_toggle_mute()
 					await mute_entity.async_update_state()

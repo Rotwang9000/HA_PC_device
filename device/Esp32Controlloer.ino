@@ -47,6 +47,7 @@ struct MqttTopics {
   String update;
   String mute;      // For computer
   String lock;      // For computer
+  String enforceLock; // For computer enforce lock toggle
 };
 
 MqttTopics topics;
@@ -82,6 +83,7 @@ void updateTopics() {
     topics.volume = computerBase + "/setvolume";
     topics.mute = computerBase + "/mute";
     topics.lock = computerBase + "/lock";
+    topics.enforceLock = "homeassistant/switch/computer_" + String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1).toLowerCase() + "_enforce_lock/set";
     topics.brightness = "";
     topics.hs = "";
     topics.source = "";
@@ -465,26 +467,36 @@ void loop() {
 
   const Entity& entity = entities[currentEntityIndex];
   if (strcmp(entity.domain, "computer") == 0) {
-    // computer-specific controls
+    // Computer-specific controls
     if (currentPushButtonState != lastPushButtonState && currentPushButtonState == LOW) {
-      // Dial push: mute
-      Serial.print("Dial push detected, publishing lock command to ");
-      Serial.println(topics.mute);
-      client.publish(topics.mute.c_str(), "TOGGLE");
+      // Rotary push: toggle mute or turn on if computer is off
+      if (!entityStates[currentEntityIndex]) {
+        // Computer is off, turn it on
+        Serial.print("Computer is off, turning on via ");
+        Serial.println(topics.command);
+        client.publish(topics.command.c_str(), "ON");
+      } else {
+        // Computer is on, toggle mute
+        Serial.print("Dial push detected, publishing mute command to ");
+        Serial.println(topics.mute);
+        client.publish(topics.mute.c_str(), "TOGGLE");
+      }
       delay(50);
     }
 
-    if (currentButtonState != lastButtonState && currentButtonState == HIGH) {
-      // Button press: lock
-      Serial.print("Button press detected, publishing lock command to ");
-      Serial.println(topics.lock);
-      client.publish(topics.lock.c_str(), "LOCK");
+    if (currentBackButtonState != lastBackButtonState && currentBackButtonState == LOW) {
+      // Back button: toggle enforce_lock
+      Serial.print("Back button press detected, toggling enforce lock via ");
+      Serial.println(topics.enforceLock);
+      bool currentEnforceLockState = (pcSessionState == "locked");
+      client.publish(topics.enforceLock.c_str(), currentEnforceLockState ? "OFF" : "ON");
       delay(50);
     }
 
-    if (currentButtonState == HIGH && currentPushButtonState == LOW) {
+    // Back + rotary push: power off
+    if (currentBackButtonState == LOW && currentPushButtonState == LOW) {
       // Button + dial push: power off (send as set with payload OFF)
-      Serial.print("Button + dial push detected, publishing power off command to ");
+      Serial.print("Back button + dial push detected, publishing power off command to ");
       Serial.println(topics.command);
       client.publish(topics.command.c_str(), "OFF");
       delay(50);
@@ -716,6 +728,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.print(": ");
         Serial.println(pcSessionState);
       }
+      if (doc.containsKey("enforce_lock") && !doc["enforce_lock"].isNull()) {
+        bool enforceLockState = doc["enforce_lock"].as<bool>();
+        Serial.print("Enforce lock updated for ");
+        Serial.print(entity_id);
+        Serial.print(": ");
+        Serial.println(enforceLockState ? "enabled" : "disabled");
+      }
     }
   }
 
@@ -896,12 +915,26 @@ void updateDisplay() {
     } else {
       display.print(pcActiveWindow);
     }
-  }
-  display.setCursor(0, 50);
-  display.setTextSize(2);
-  if (strcmp(entity.domain, "computer") == 0) {
-    display.println(pcSessionState == "locked" ? "LOCK" : "UNLOCK");
-  } else {
+    
+    display.setCursor(0, 50);
+    display.setTextSize(1);
+    display.print(pcSessionState == "locked" ? "LOCK " : "UNLOCK ");
+    
+    // Check if there's enforce_lock information in the payload
+    bool enforceLockActive = false;
+    for (int i = 0; i < numEntities; i++) {
+      if (strcmp(entities[i].domain, "computer") == 0 && 
+          strcmp(entities[i].entityId, entity.entityId) == 0) {
+        // This is a match, check if enforce_lock is active
+        enforceLockActive = (pcSessionState == "locked");
+        break;
+      }
+    }
+    
+    display.print(enforceLockActive ? "(ENFORCED)" : "");
+    
+    display.setCursor(0, 60);
+    display.setTextSize(2);
     display.println(entityStates[currentEntityIndex] ? " ON" : " OFF");
   }
   display.display();

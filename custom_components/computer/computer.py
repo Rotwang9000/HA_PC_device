@@ -39,10 +39,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		# Create additional entities
 		volume_entity = ComputerVolumeEntity(hass, config_entry.entry_id, config_entry.data, entity)
 		mute_entity = ComputerMuteEntity(hass, config_entry.entry_id, config_entry.data, entity)
-		lock_entity = ComputerLockButton(hass, config_entry.entry_id, config_entry.data, entity)
+		lock_button = ComputerLockButton(hass, config_entry.entry_id, config_entry.data, entity)
+		enforce_lock_entity = ComputerEnforceLockSwitch(hass, config_entry.entry_id, config_entry.data, entity)
 		
 		# Add all entities
-		async_add_entities([entity, volume_entity, mute_entity, lock_entity])
+		async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
 		_LOGGER.debug("Added entities for Computer %s to Home Assistant", device_name)
 
 		# Store entity for later access
@@ -53,7 +54,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			"main": entity,
 			"volume": volume_entity,
 			"mute": mute_entity,
-			"lock": lock_entity
+			"lock": lock_button,
+			"enforce_lock": enforce_lock_entity
 		}
 	except Exception as e:
 		_LOGGER.error("Failed to create Computer entities: %s", e)
@@ -97,7 +99,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 				await entity.async_turn_off()
 		elif msg.topic == lock_topic:
 			await entity.async_toggle_enforce_lock()
-			await lock_entity.async_update_state()
+			await enforce_lock_entity.async_update_state()
 		elif msg.topic == mute_topic:
 			await entity.async_toggle_mute()
 			await mute_entity.async_update_state()
@@ -387,6 +389,41 @@ class ComputerLockButton(ButtonEntity):
 	async def async_press(self):
 		"""Handle button press."""
 		await self.parent.async_toggle_enforce_lock()
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state()
+
+class ComputerEnforceLockSwitch(SwitchEntity):
+	"""Enforce Lock control switch for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize enforce lock switch entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"{self.parent._attr_unique_id}_enforce_lock"
+		self._attr_name = f"{self.parent._attr_name} Enforce Lock"
+		self._attr_device_info = self.parent._attr_device_info
+		self._attr_icon = "mdi:lock-check"
+		self._attr_device_class = "switch"
+		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+	@property
+	def is_on(self):
+		"""Return true if enforce lock is enabled."""
+		return self.parent._enforce_lock
+		
+	async def async_turn_on(self, **kwargs):
+		"""Turn on enforce lock."""
+		if not self.parent._enforce_lock:
+			await self.parent.async_toggle_enforce_lock()
+		
+	async def async_turn_off(self, **kwargs):
+		"""Turn off enforce lock."""
+		if self.parent._enforce_lock:
+			await self.parent.async_toggle_enforce_lock()
 		
 	async def async_update_state(self):
 		"""Update the entity state."""
