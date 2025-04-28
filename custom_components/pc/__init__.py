@@ -66,20 +66,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Guard against duplicate concurrent setups for the same entry
-    # Home Assistant may trigger async_setup_entry again while a previous
-    # attempt is still running which would raise a ConfigEntryState error.
-    if entry.entry_id in hass.data.get(DOMAIN, {}).get("pending_setups", []):
-        _LOGGER.warning(
-            "Entry %s is already in the process of being set up – skipping duplicate call",
-            entry.entry_id,
-        )
+    # Ensure we have a set tracking pending setups – doing this *before* the guard
+    # avoids a race where two concurrent calls both saw the list missing.
+    pending: set[str] = hass.data[DOMAIN].setdefault("pending_setups", set())
+
+    # Guard against a concurrent setup already in progress for this entry.
+    if entry.entry_id in pending:
+        _LOGGER.warning("Entry %s is already mid-setup; aborting duplicate call", entry.entry_id)
         return False
-    
-    # Mark entry as being set up
-    if "pending_setups" not in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["pending_setups"] = []
-    hass.data[DOMAIN]["pending_setups"].append(entry.entry_id)
+
+    # Mark entry as being set up now
+    pending.add(entry.entry_id)
     
     try:
         # Ensure the integration is loaded asynchronously
@@ -93,7 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][entry.entry_id] = entry.data
         
         # Remove from pending setups
-        hass.data[DOMAIN]["pending_setups"].remove(entry.entry_id)
+        pending.remove(entry.entry_id)
         
         return True
     except Exception as e:
@@ -101,9 +98,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error(f"Current entry state: {entry.state}")
         _LOGGER.error("To fix this issue, please remove this integration through the UI and add it again.")
         
-        # Remove from pending setups
-        if "pending_setups" in hass.data[DOMAIN] and entry.entry_id in hass.data[DOMAIN]["pending_setups"]:
-            hass.data[DOMAIN]["pending_setups"].remove(entry.entry_id)
+        # Remove from pending setups if there
+        if "pending_setups" in hass.data[DOMAIN]:
+            pending = hass.data[DOMAIN]["pending_setups"]
+            if entry.entry_id in pending:
+                pending.remove(entry.entry_id)
+                _LOGGER.debug("Removed %s from pending setups after error", entry.entry_id)
         
         # Clear our data for this entry
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -114,9 +114,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug(f"Unloading entry {entry.entry_id}")
     try:
         # Remove from pending setups if it's there
-        if "pending_setups" in hass.data[DOMAIN] and entry.entry_id in hass.data[DOMAIN]["pending_setups"]:
-            hass.data[DOMAIN]["pending_setups"].remove(entry.entry_id)
-            _LOGGER.debug(f"Removed {entry.entry_id} from pending setups")
+        if "pending_setups" in hass.data[DOMAIN]:
+            pending = hass.data[DOMAIN]["pending_setups"]
+            if entry.entry_id in pending:
+                pending.remove(entry.entry_id)
+                _LOGGER.debug("Removed %s from pending setups", entry.entry_id)
             
         # Unload the platform
         unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
