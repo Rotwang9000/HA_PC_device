@@ -6,7 +6,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["pc"]  # Use the custom 'pc' domain as a platform
+PLATFORMS = ["media_player"]  # Use the media_player platform instead of custom pc platform
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the PC component."""
@@ -89,9 +89,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Unload the platform
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded:
-        # Remove data associated with the entry
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-    return unloaded
+    _LOGGER.debug(f"Unloading entry {entry.entry_id}")
+    try:
+        # Unload the platform
+        unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        _LOGGER.debug(f"Platform unload result: {unloaded}")
+        
+        # Clean up data in hass.data
+        if DOMAIN in hass.data:
+            if entry.entry_id in hass.data[DOMAIN]:
+                hass.data[DOMAIN].pop(entry.entry_id, None)
+                _LOGGER.debug(f"Removed entry data for {entry.entry_id}")
+            
+            # Also clean up from entities dict if it exists
+            if "entities" in hass.data[DOMAIN] and entry.entry_id in hass.data[DOMAIN]["entities"]:
+                hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
+                _LOGGER.debug(f"Removed entity for {entry.entry_id} from entities dict")
+        
+        return unloaded
+    except Exception as e:
+        _LOGGER.error(f"Error unloading entry {entry.entry_id}: {str(e)}")
+        return False

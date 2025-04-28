@@ -27,8 +27,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         async_add_entities([entity])
         _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
     except Exception as e:
-        _LOGGER.error(f"Failed to create PCDevice entity: {e}")
-        raise
+        _LOGGER.error(f"Error setting up media_player entity: {e}")
+        # Return True anyway to prevent the config entry from getting stuck
+        return True
 
     # Register the device in the device registry
     device_registry = dr.async_get(hass)
@@ -76,6 +77,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     await mqtt.async_subscribe(hass, mute_topic, message_received)
     await mqtt.async_subscribe(hass, setvolume_topic, message_received)
     _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+
+    return True
 
 class PCDevice(MediaPlayerEntity):
     """Representation of a PC device as a media player."""
@@ -239,3 +242,30 @@ class PCDevice(MediaPlayerEntity):
             await mqtt.async_publish(self.hass, topic, payload_str)
         except (TypeError, ValueError) as e:
             _LOGGER.error(f"Failed to serialize state to JSON for {topic}: {e}")
+
+async def async_unload_entry(hass, entry):
+    """Unload the PC device platform."""
+    _LOGGER.debug(f"Unloading media_player platform for entry {entry.entry_id}")
+    try:
+        # Unsubscribe from MQTT topics
+        if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+            unsubscribes = hass.data[DOMAIN][entry.entry_id].get("unsubscribes", [])
+            for unsubscribe in unsubscribes:
+                try:
+                    unsubscribe()
+                except Exception as e:
+                    pass
+            
+            # Clean up entry data
+            hass.data[DOMAIN][entry.entry_id].clear()
+        
+        # Remove entity from entities dict if it exists
+        if DOMAIN in hass.data and "entities" in hass.data[DOMAIN]:
+            if entry.entry_id in hass.data[DOMAIN]["entities"]:
+                hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
+                _LOGGER.debug(f"Removed entity for {entry.entry_id} from entities dict")
+        
+        return True
+    except Exception as e:
+        _LOGGER.error(f"Error unloading entry {entry.entry_id}: {e}")
+        return False
