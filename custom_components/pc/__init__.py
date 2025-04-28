@@ -3,6 +3,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.loader import async_get_integration
 from .const import DOMAIN
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,23 +67,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Check if Home Assistant has already marked this entry as being in setup progress
-    # This can happen if HA's internal state was set before our guard check.
-    if entry.state is ConfigEntryState.SETUP_IN_PROGRESS:
-        _LOGGER.warning("Entry %s is already marked as SETUP_IN_PROGRESS by Home Assistant; aborting duplicate call", entry.entry_id)
-        return False
-
-    # Ensure we have a set tracking pending setups – doing this *before* the guard
-    pending: set[str] = hass.data[DOMAIN].setdefault("pending_setups", set())
-
-    # Guard against a concurrent setup already in progress for this entry.
-    if entry.entry_id in pending:
-        _LOGGER.warning("Entry %s is already mid-setup; aborting duplicate call", entry.entry_id)
-        return False
-
-    # Mark entry as being set up now
-    pending.add(entry.entry_id)
+    # Use a global lock to ensure only one setup runs at a time for this integration
+    # This prevents any concurrent setup issues regardless of HA's internal state
+    if "setup_lock" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["setup_lock"] = asyncio.Lock()
     
+    setup_lock = hass.data[DOMAIN]["setup_lock"]
+    if setup_lock.locked():
+        _LOGGER.warning("Setup lock is held; another setup is in progress. Queuing setup for entry %s", entry.entry_id)
+    
+    async with setup_lock:
+        _LOGGER.debug("Acquired setup lock for entry %s", entry.entry_id)
+        # Double-check if this entry was already set up while we waited
+        if entry.entry_id in hass.data[DOMAIN] and entry.entry_id != "setup_lock":
+            _LOGGER.warning("Entry %s was set up while waiting for lock; skipping duplicate setup", entry.entry_id)
+            return False
+
     try:
         # Ensure the integration is loaded asynchronously
         integration = await async_get_integration(hass, DOMAIN)
@@ -94,21 +94,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Store entry data after successful setup
         hass.data[DOMAIN][entry.entry_id] = entry.data
         
-        # Remove from pending setups
-        pending.remove(entry.entry_id)
-        
         return True
     except Exception as e:
         _LOGGER.error(f"Failed to setup entry {entry.entry_id}: {str(e)}")
         _LOGGER.error(f"Current entry state: {entry.state}")
         _LOGGER.error("To fix this issue, please remove this integration through the UI and add it again.")
-        
-        # Remove from pending setups if there
-        if "pending_setups" in hass.data[DOMAIN]:
-            pending = hass.data[DOMAIN]["pending_setups"]
-            if entry.entry_id in pending:
-                pending.remove(entry.entry_id)
-                _LOGGER.debug("Removed %s from pending setups after error", entry.entry_id)
         
         # Clear our data for this entry
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -118,13 +108,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     _LOGGER.debug(f"Unloading entry {entry.entry_id}")
     try:
-        # Remove from pending setups if it's there
-        if "pending_setups" in hass.data[DOMAIN]:
-            pending = hass.data[DOMAIN]["pending_setups"]
-            if entry.entry_id in pending:
-                pending.remove(entry.entry_id)
-                _LOGGER.debug("Removed %s from pending setups", entry.entry_id)
-            
         # Unload the platform
         unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
         _LOGGER.debug(f"Platform unload result: {unloaded}")
