@@ -26,6 +26,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
         async_add_entities([entity])
         _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
+
+        # Store the entity in hass.data for access during unload
+        if "entities" not in hass.data[DOMAIN]:
+            hass.data[DOMAIN]["entities"] = {}
+        hass.data[DOMAIN]["entities"][config_entry.entry_id] = entity
     except Exception as e:
         _LOGGER.error(f"Failed to create PCDevice entity: {e}")
         raise
@@ -41,7 +46,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
     _LOGGER.debug(f"Registered device in device registry: {device_entry.id}")
 
-    # Subscribe to MQTT topics
+    # Subscribe to MQTT topics and store unsubscribe functions
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
     update_topic = f"homeassistant/PC/PC.{device_name}/update"
     lock_topic = f"homeassistant/PC/PC.{device_name}/lock"
@@ -71,11 +76,20 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             except ValueError as e:
                 _LOGGER.error(f"Invalid volume value received: {payload}, error: {e}")
 
-    await mqtt.async_subscribe(hass, set_topic, message_received)
-    await mqtt.async_subscribe(hass, lock_topic, message_received)
-    await mqtt.async_subscribe(hass, mute_topic, message_received)
-    await mqtt.async_subscribe(hass, setvolume_topic, message_received)
+    # Subscribe and store the unsubscribe functions
+    unsubscribe_set = await mqtt.async_subscribe(hass, set_topic, message_received)
+    unsubscribe_lock = await mqtt.async_subscribe(hass, lock_topic, message_received)
+    unsubscribe_mute = await mqtt.async_subscribe(hass, mute_topic, message_received)
+    unsubscribe_setvolume = await mqtt.async_subscribe(hass, setvolume_topic, message_received)
     _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+
+    # Store unsubscribe functions in hass.data for cleanup
+    hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = [
+        unsubscribe_set,
+        unsubscribe_lock,
+        unsubscribe_mute,
+        unsubscribe_setvolume
+    ]
 
 class PCDevice(Entity):
     """Representation of a PC device in the custom PC platform."""
@@ -230,3 +244,12 @@ class PCDevice(Entity):
             await mqtt.async_publish(self.hass, topic, payload_str)
         except (TypeError, ValueError) as e:
             _LOGGER.error(f"Failed to serialize state to JSON for {topic}: {e}")
+
+async def async_unload_entry(hass, entry):
+    """Unload the PC device platform."""
+    # Unsubscribe from MQTT topics
+    unsubscribes = hass.data[DOMAIN].get(entry.entry_id, {}).get("unsubscribes", [])
+    for unsubscribe in unsubscribes:
+        unsubscribe()
+    # Remove entity and cleanup
+    hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
