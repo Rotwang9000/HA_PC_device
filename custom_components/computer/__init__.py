@@ -108,16 +108,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 		_LOGGER.warning("Entry %s already set up, not proceeding with duplicate setup", entry.entry_id)
 		return True
 	
-	# Register our platform manually rather than using async_forward_entry_setups
-	# This is to avoid Home Assistant's internal ConfigEntryState management that causes conflicts
-	for platform in PLATFORMS:
-		hass.async_create_task(
-			hass.config_entries.async_forward_entry_setup(entry, platform)
-		)
+	# Check if the entry is already in LOADED state to avoid OperationNotAllowed error
+	if entry.state is ConfigEntryState.LOADED:
+		_LOGGER.warning("Entry %s is already in LOADED state, returning success without setup", entry.entry_id)
+		return True
 	
-	# Store the entry data
-	hass.data[DOMAIN][entry.entry_id] = entry.data
-	_LOGGER.debug("Successfully initiated setup for Computer entry %s", entry.entry_id)
+	# Register our platform manually rather than using async_forward_entry_setups
+	# Use the dedicated setup function for the computer platform
+	from .computer import async_setup_entry as setup_computer
+	
+	try:
+		# Call our platform's setup function directly
+		hass.async_create_task(setup_computer(hass, entry, hass.data[DOMAIN].setdefault("entities", {})))
+		
+		# Store the entry data
+		hass.data[DOMAIN][entry.entry_id] = entry.data
+		_LOGGER.debug("Successfully initiated direct setup for Computer entry %s", entry.entry_id)
+	except Exception as e:
+		_LOGGER.error("Error setting up Computer entry %s: %s", entry.entry_id, str(e))
+		return False
 	
 	# Return success immediately, the platform setup runs in background
 	return True
@@ -126,14 +135,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	"""Unload a config entry more directly, matching our setup pattern."""
 	_LOGGER.debug("Unloading Computer entry %s", entry.entry_id)
 	
-	# Unload platforms individually rather than using async_unload_platforms
+	# No need to try unloading through Home Assistant's system - we never registered
+	# our platforms with it. We just need to clean up our own data.
 	unload_ok = True
-	for platform in PLATFORMS:
-		if await hass.config_entries.async_forward_entry_unload(entry, platform):
-			_LOGGER.debug("Unloaded platform %s for entry %s", platform, entry.entry_id)
-		else:
-			unload_ok = False
-			_LOGGER.error("Failed to unload platform %s for entry %s", platform, entry.entry_id)
 	
 	# Clean up data regardless of unload success
 	if entry.entry_id in hass.data.get(DOMAIN, {}):
