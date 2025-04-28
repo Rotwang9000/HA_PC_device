@@ -324,6 +324,9 @@ class ComputerVolumeEntity(NumberEntity):
 		self._attr_device_class = "volume"  # Custom device class for volume
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
+		# Custom entity_id format: computer.device_name.volume
+		self.entity_id = f"computer.{self._device_name.lower()}.volume"
+		
 	@property
 	def native_value(self):
 		"""Return current volume level."""
@@ -352,6 +355,9 @@ class ComputerMuteEntity(SwitchEntity):
 		self._attr_icon = "mdi:volume-mute"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+		# Custom entity_id format: computer.device_name.mute
+		self.entity_id = f"computer.{self._device_name.lower()}.mute"
 		
 	@property
 	def is_on(self):
@@ -386,6 +392,9 @@ class ComputerLockButton(ButtonEntity):
 		self._attr_device_class = "lock"
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
+		# Custom entity_id format: computer.device_name.lock
+		self.entity_id = f"computer.{self._device_name.lower()}.lock"
+		
 	async def async_press(self):
 		"""Handle button press."""
 		await self.parent.async_toggle_enforce_lock()
@@ -409,6 +418,9 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self._attr_icon = "mdi:lock-check"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+		# Custom entity_id format: computer.device_name.enforce_lock
+		self.entity_id = f"computer.{self._device_name.lower()}.enforce_lock"
 		
 	@property
 	def is_on(self):

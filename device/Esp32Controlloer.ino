@@ -76,14 +76,20 @@ void updateTopics() {
     topics.lock = "";
   } else if (strcmp(entity.domain, "computer") == 0) {
     // Use the correct MQTT topic for computer integration
-    String computerBase = "homeassistant/Computer/Computer." + String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1);
+    String computerName = String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1).toLowerCase();
+    String computerBase = "homeassistant/Computer/Computer." + computerName;
+    
+    // Main entity topics
     topics.command = computerBase + "/set";
     topics.requestState = computerBase + "/request_state";
     topics.update = computerBase + "/update";
-    topics.volume = computerBase + "/setvolume";
-    topics.mute = computerBase + "/mute";
-    topics.lock = computerBase + "/lock";
-    topics.enforceLock = "homeassistant/switch/computer_" + String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1).toLowerCase() + "_enforce_lock/set";
+    
+    // Helper entity topics - use proper entity ID format with dots
+    topics.volume = "homeassistant/number/computer." + computerName + ".volume/set";
+    topics.mute = "homeassistant/switch/computer." + computerName + ".mute/toggle";
+    topics.lock = "homeassistant/button/computer." + computerName + ".lock/press";
+    topics.enforceLock = "homeassistant/switch/computer." + computerName + ".enforce_lock/set";
+    
     topics.brightness = "";
     topics.hs = "";
     topics.source = "";

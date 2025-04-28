@@ -710,7 +710,10 @@
 				"light.led_flood_light",
 				"media_player.lgnano_55",
 				"computer.felixlaptop",
-				"computer.neuralnet"
+				"computer.neuralnet",
+				"computer.felixlaptop.volume",
+				"computer.felixlaptop.mute",
+				"computer.felixlaptop.enforce_lock"
 			],
 			"substring": [],
 			"regex": []
