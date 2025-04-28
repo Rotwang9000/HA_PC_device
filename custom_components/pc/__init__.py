@@ -66,11 +66,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Check if entry is already being set up
-    if entry.entry_id in hass.data.get(DOMAIN, {}):
-        if entry.entry_id in hass.data[DOMAIN].get("pending_setups", []):
-            _LOGGER.warning(f"Entry {entry.entry_id} is already being set up, skipping duplicate setup")
-            return False
+    # Guard against duplicate concurrent setups for the same entry
+    # Home Assistant may trigger async_setup_entry again while a previous
+    # attempt is still running which would raise a ConfigEntryState error.
+    if entry.entry_id in hass.data.get(DOMAIN, {}).get("pending_setups", []):
+        _LOGGER.warning(
+            "Entry %s is already in the process of being set up – skipping duplicate call",
+            entry.entry_id,
+        )
+        return False
     
     # Mark entry as being set up
     if "pending_setups" not in hass.data[DOMAIN]:
