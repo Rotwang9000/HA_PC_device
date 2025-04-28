@@ -29,6 +29,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
 
         # Store the entity in hass.data for access during unload
+        # Initialize the entities dictionary if it doesn't exist
+        if DOMAIN not in hass.data:
+            hass.data.setdefault(DOMAIN, {})
         if "entities" not in hass.data[DOMAIN]:
             hass.data[DOMAIN]["entities"] = {}
         hass.data[DOMAIN]["entities"][config_entry.entry_id] = entity
@@ -123,7 +126,11 @@ async def async_unload_entry(hass, entry):
     for unsubscribe in unsubscribes:
         unsubscribe()
     # Remove entity and cleanup
-    hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
+    if "entities" in hass.data[DOMAIN] and entry.entry_id in hass.data[DOMAIN]["entities"]:
+        hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
+        _LOGGER.debug(f"Removed entity for {entry.entry_id}")
+    
+    return True
 
 class PCDevice(Entity):
     """Representation of a PC device in the custom PC platform."""
