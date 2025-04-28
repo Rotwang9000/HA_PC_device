@@ -1,11 +1,13 @@
 """Custom PC platform for PC Device integration."""
 import logging
 import json
+import asyncio
 from homeassistant.helpers.entity import Entity
 from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
+from homeassistant.exceptions import HomeAssistantError
 from .const import (
     DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
@@ -46,7 +48,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
     _LOGGER.debug(f"Registered device in device registry: {device_entry.id}")
 
-    # Subscribe to MQTT topics and store unsubscribe functions
+    # Check if MQTT integration is available
+    if not await mqtt.async_wait_for_mqtt_client(hass, timeout=5):
+        _LOGGER.error("MQTT integration is not available or broker is not connected")
+        raise HomeAssistantError("MQTT integration is not available")
+
+    # Subscribe to MQTT topics with a timeout
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
     update_topic = f"homeassistant/PC/PC.{device_name}/update"
     lock_topic = f"homeassistant/PC/PC.{device_name}/lock"
@@ -76,12 +83,28 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             except ValueError as e:
                 _LOGGER.error(f"Invalid volume value received: {payload}, error: {e}")
 
-    # Subscribe and store the unsubscribe functions
-    unsubscribe_set = await mqtt.async_subscribe(hass, set_topic, message_received)
-    unsubscribe_lock = await mqtt.async_subscribe(hass, lock_topic, message_received)
-    unsubscribe_mute = await mqtt.async_subscribe(hass, mute_topic, message_received)
-    unsubscribe_setvolume = await mqtt.async_subscribe(hass, setvolume_topic, message_received)
-    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+    # Subscribe with a timeout
+    try:
+        unsubscribe_set = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, set_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_lock = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, lock_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_mute = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, mute_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_setvolume = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, setvolume_topic, message_received),
+            timeout=10
+        )
+        _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+    except asyncio.TimeoutError as e:
+        _LOGGER.error(f"Timeout while subscribing to MQTT topics: {e}")
+        raise HomeAssistantError("Failed to subscribe to MQTT topics due to timeout")
 
     # Store unsubscribe functions in hass.data for cleanup
     hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = [
@@ -90,6 +113,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         unsubscribe_mute,
         unsubscribe_setvolume
     ]
+
+async def async_unload_entry(hass, entry):
+    """Unload the PC device platform."""
+    # Unsubscribe from MQTT topics
+    unsubscribes = hass.data[DOMAIN].get(entry.entry_id, {}).get("unsubscribes", [])
+    for unsubscribe in unsubscribes:
+        unsubscribe()
+    # Remove entity and cleanup
+    hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
 
 class PCDevice(Entity):
     """Representation of a PC device in the custom PC platform."""
@@ -244,12 +276,3 @@ class PCDevice(Entity):
             await mqtt.async_publish(self.hass, topic, payload_str)
         except (TypeError, ValueError) as e:
             _LOGGER.error(f"Failed to serialize state to JSON for {topic}: {e}")
-
-async def async_unload_entry(hass, entry):
-    """Unload the PC device platform."""
-    # Unsubscribe from MQTT topics
-    unsubscribes = hass.data[DOMAIN].get(entry.entry_id, {}).get("unsubscribes", [])
-    for unsubscribe in unsubscribes:
-        unsubscribe()
-    # Remove entity and cleanup
-    hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
