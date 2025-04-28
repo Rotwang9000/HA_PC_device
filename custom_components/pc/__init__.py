@@ -2,6 +2,7 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.loader import async_get_integration
+from homeassistant.const import ConfigEntryState
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,6 +79,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    hass.data[DOMAIN].pop(entry.entry_id, None)
-    return True
+    # Unload the platform
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        # Remove data associated with the entry
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Reset the config entry state to NOT_LOADED
+        if entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
+            _LOGGER.warning(f"Config entry {entry.entry_id} was stuck in SETUP_IN_PROGRESS; resetting state to NOT_LOADED")
+            entry.state = ConfigEntryState.NOT_LOADED
+    return unloaded
