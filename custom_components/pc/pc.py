@@ -20,10 +20,9 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the PC device from a config entry."""
-    _LOGGER.debug(f"Setting up PC device for config entry: {config_entry.entry_id}")
+    _LOGGER.debug(f"[pc.py] Starting setup for config entry: {config_entry.entry_id}")
     device_name = config_entry.data[CONF_DEVICE_NAME]
     _LOGGER.debug(f"Device name: {device_name}")
-    
     try:
         entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
         async_add_entities([entity])
@@ -106,13 +105,16 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         _LOGGER.error(f"Timeout while subscribing to MQTT topics: {e}")
         raise HomeAssistantError("Failed to subscribe to MQTT topics due to timeout")
 
-    # Store unsubscribe functions in hass.data for cleanup
+    # Ensure hass.data[DOMAIN][config_entry.entry_id] exists
+    if config_entry.entry_id not in hass.data[DOMAIN]:
+        hass.data[DOMAIN][config_entry.entry_id] = {}
     hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = [
         unsubscribe_set,
         unsubscribe_lock,
         unsubscribe_mute,
         unsubscribe_setvolume
     ]
+    _LOGGER.debug(f"[pc.py] Finished setup for config entry: {config_entry.entry_id}")
 
 async def async_unload_entry(hass, entry):
     """Unload the PC device platform."""
