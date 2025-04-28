@@ -1,13 +1,12 @@
 import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.loader import async_get_integration
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.DOMAIN]
+PLATFORMS = ["pc"]  # Use the custom 'pc' domain as a platform
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the PC component."""
@@ -78,6 +77,4 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    hass.data[DOMAIN].pop(entry.entry_id)
-    return True
+    await hass.config_entries
