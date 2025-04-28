@@ -1,0 +1,68 @@
+turn_on:
+  name: Turn On
+  description: Turns on the computer.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID of the computer to turn on.
+      required: true
+      selector:
+        entity:
+          integration: computer
+
+turn_off:
+  name: Turn Off
+  description: Turns off the computer.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID of the computer to turn off.
+      required: true
+      selector:
+        entity:
+          integration: computer
+
+set_volume_level:
+  name: Set Volume Level
+  description: Sets the volume level of the computer.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID of the computer.
+      required: true
+      selector:
+        entity:
+          integration: computer
+    volume_level:
+      name: Volume Level
+      description: The volume level to set (0.0 to 1.0).
+      required: true
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.01
+
+toggle_mute:
+  name: Toggle Mute
+  description: Toggles the mute state of the computer.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID of the computer.
+      required: true
+      selector:
+        entity:
+          integration: computer
+
+toggle_enforce_lock:
+  name: Toggle Enforce Lock
+  description: Toggles the enforced lock state of the computer.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The entity ID of the computer.
+      required: true
+      selector:
+        entity:
+          integration: computer 
