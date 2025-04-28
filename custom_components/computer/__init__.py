@@ -92,53 +92,57 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 	return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-	"""Set up Computer from a config entry."""
-	_LOGGER.debug("Setting up Computer config entry %s", entry.entry_id)
+	"""Use a completely different pattern to set up a Computer config entry.
+	
+	This implementation avoids Home Assistant's internal ConfigEntryState
+	management by using a different approach that doesn't trigger the
+	SETUP_IN_PROGRESS state conflicts.
+	"""
+	_LOGGER.debug("Setting up Computer entry %s using custom approach", entry.entry_id)
 	
 	# Initialize data structure
 	hass.data.setdefault(DOMAIN, {})
 	
-	# Create/get setup lock
-	if "setup_lock" not in hass.data[DOMAIN]:
-		hass.data[DOMAIN]["setup_lock"] = asyncio.Lock()
-	setup_lock = hass.data[DOMAIN]["setup_lock"]
+	# First check if we've already set this up to avoid any duplicates
+	if entry.entry_id in hass.data[DOMAIN] and entry.entry_id != "setup_lock":
+		_LOGGER.warning("Entry %s already set up, not proceeding with duplicate setup", entry.entry_id)
+		return True
 	
-	# Use lock to prevent concurrent setups
-	async with setup_lock:
-		try:
-			# Forward the entry to the platform
-			await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-			hass.data[DOMAIN][entry.entry_id] = entry.data
-			_LOGGER.debug("Successfully set up Computer entry %s", entry.entry_id)
-			return True
-		except Exception as e:
-			_LOGGER.error("Failed to set up Computer entry %s: %s", entry.entry_id, str(e))
-			return False
+	# Register our platform manually rather than using async_forward_entry_setups
+	# This is to avoid Home Assistant's internal ConfigEntryState management that causes conflicts
+	for platform in PLATFORMS:
+		hass.async_create_task(
+			hass.config_entries.async_forward_entry_setup(entry, platform)
+		)
+	
+	# Store the entry data
+	hass.data[DOMAIN][entry.entry_id] = entry.data
+	_LOGGER.debug("Successfully initiated setup for Computer entry %s", entry.entry_id)
+	
+	# Return success immediately, the platform setup runs in background
+	return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-	"""Unload a config entry."""
+	"""Unload a config entry more directly, matching our setup pattern."""
 	_LOGGER.debug("Unloading Computer entry %s", entry.entry_id)
 	
-	# Use lock to prevent unloading while setting up
-	if "setup_lock" in hass.data[DOMAIN]:
-		setup_lock = hass.data[DOMAIN]["setup_lock"]
-		async with setup_lock:
-			# Unload platforms
-			unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-			
-			# Clean up data
-			if unload_ok and entry.entry_id in hass.data[DOMAIN]:
-				hass.data[DOMAIN].pop(entry.entry_id)
-				
-				# Clean up entity data if it exists
-				if "entities" in hass.data[DOMAIN] and entry.entry_id in hass.data[DOMAIN]["entities"]:
-					hass.data[DOMAIN]["entities"].pop(entry.entry_id)
-					
-			_LOGGER.debug("Unload success for Computer entry %s: %s", entry.entry_id, unload_ok)
-			return unload_ok
-	else:
-		# If no lock exists, we can just unload directly
-		unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-		if unload_ok and entry.entry_id in hass.data.get(DOMAIN, {}):
-			hass.data[DOMAIN].pop(entry.entry_id)
-		return unload_ok 
+	# Unload platforms individually rather than using async_unload_platforms
+	unload_ok = True
+	for platform in PLATFORMS:
+		if await hass.config_entries.async_forward_entry_unload(entry, platform):
+			_LOGGER.debug("Unloaded platform %s for entry %s", platform, entry.entry_id)
+		else:
+			unload_ok = False
+			_LOGGER.error("Failed to unload platform %s for entry %s", platform, entry.entry_id)
+	
+	# Clean up data regardless of unload success
+	if entry.entry_id in hass.data.get(DOMAIN, {}):
+		hass.data[DOMAIN].pop(entry.entry_id)
+		_LOGGER.debug("Removed data for entry %s", entry.entry_id)
+	
+	# Clean up entity data if it exists
+	if "entities" in hass.data.get(DOMAIN, {}) and entry.entry_id in hass.data[DOMAIN]["entities"]:
+		hass.data[DOMAIN]["entities"].pop(entry.entry_id)
+		_LOGGER.debug("Removed entity for entry %s", entry.entry_id)
+	
+	return unload_ok 
