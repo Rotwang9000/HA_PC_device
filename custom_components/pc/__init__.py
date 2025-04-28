@@ -65,6 +65,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    if entry.entry_id in hass.data[DOMAIN]:
+        _LOGGER.warning(f"Entry {entry.entry_id} already exists in hass.data[{DOMAIN}], attempting to unload before setup")
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
     # Ensure the integration is loaded asynchronously
