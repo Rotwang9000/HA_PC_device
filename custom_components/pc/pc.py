@@ -1,11 +1,13 @@
-"""Media player platform for PC Device integration."""
+"""Custom PC platform for PC Device integration."""
 import logging
 import json
-from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerState
+import asyncio
+from homeassistant.helpers.entity import Entity
 from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
+from homeassistant.exceptions import HomeAssistantError
 from .const import (
     DOMAIN, CONF_DEVICE_NAME,
     CONF_POWER_ON_ACTION, CONF_POWER_OFF_ACTION,
@@ -18,18 +20,21 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the PC device from a config entry."""
-    _LOGGER.debug(f"Setting up PC device for config entry: {config_entry.entry_id}")
+    _LOGGER.debug(f"[pc.py] Starting setup for config entry: {config_entry.entry_id}")
     device_name = config_entry.data[CONF_DEVICE_NAME]
     _LOGGER.debug(f"Device name: {device_name}")
-    
     try:
         entity = PCDevice(hass, config_entry.entry_id, config_entry.data)
         async_add_entities([entity])
         _LOGGER.debug(f"Added entity {entity._attr_unique_id} to Home Assistant")
+
+        # Store the entity in hass.data for access during unload
+        if "entities" not in hass.data[DOMAIN]:
+            hass.data[DOMAIN]["entities"] = {}
+        hass.data[DOMAIN]["entities"][config_entry.entry_id] = entity
     except Exception as e:
-        _LOGGER.error(f"Error setting up media_player entity: {e}")
-        # Return True anyway to prevent the config entry from getting stuck
-        return True
+        _LOGGER.error(f"Failed to create PCDevice entity: {e}")
+        raise
 
     # Register the device in the device registry
     device_registry = dr.async_get(hass)
@@ -42,7 +47,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
     _LOGGER.debug(f"Registered device in device registry: {device_entry.id}")
 
-    # Subscribe to MQTT topics
+    # Check if MQTT integration is available
+    if not await mqtt.async_wait_for_mqtt_client(hass, timeout=5):
+        _LOGGER.error("MQTT integration is not available or broker is not connected")
+        raise HomeAssistantError("MQTT integration is not available")
+
+    # Subscribe to MQTT topics with a timeout
     set_topic = f"homeassistant/PC/PC.{device_name}/set"
     update_topic = f"homeassistant/PC/PC.{device_name}/update"
     lock_topic = f"homeassistant/PC/PC.{device_name}/lock"
@@ -72,16 +82,51 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             except ValueError as e:
                 _LOGGER.error(f"Invalid volume value received: {payload}, error: {e}")
 
-    await mqtt.async_subscribe(hass, set_topic, message_received)
-    await mqtt.async_subscribe(hass, lock_topic, message_received)
-    await mqtt.async_subscribe(hass, mute_topic, message_received)
-    await mqtt.async_subscribe(hass, setvolume_topic, message_received)
-    _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+    # Subscribe with a timeout
+    try:
+        unsubscribe_set = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, set_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_lock = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, lock_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_mute = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, mute_topic, message_received),
+            timeout=10
+        )
+        unsubscribe_setvolume = await asyncio.wait_for(
+            mqtt.async_subscribe(hass, setvolume_topic, message_received),
+            timeout=10
+        )
+        _LOGGER.debug(f"Subscribed to MQTT topics: {set_topic}, {lock_topic}, {mute_topic}, {setvolume_topic}")
+    except asyncio.TimeoutError as e:
+        _LOGGER.error(f"Timeout while subscribing to MQTT topics: {e}")
+        raise HomeAssistantError("Failed to subscribe to MQTT topics due to timeout")
 
-    return True
+    # Ensure hass.data[DOMAIN][config_entry.entry_id] exists
+    if config_entry.entry_id not in hass.data[DOMAIN]:
+        hass.data[DOMAIN][config_entry.entry_id] = {}
+    hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = [
+        unsubscribe_set,
+        unsubscribe_lock,
+        unsubscribe_mute,
+        unsubscribe_setvolume
+    ]
+    _LOGGER.debug(f"[pc.py] Finished setup for config entry: {config_entry.entry_id}")
 
-class PCDevice(MediaPlayerEntity):
-    """Representation of a PC device as a media player."""
+async def async_unload_entry(hass, entry):
+    """Unload the PC device platform."""
+    # Unsubscribe from MQTT topics
+    unsubscribes = hass.data[DOMAIN].get(entry.entry_id, {}).get("unsubscribes", [])
+    for unsubscribe in unsubscribes:
+        unsubscribe()
+    # Remove entity and cleanup
+    hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
+
+class PCDevice(Entity):
+    """Representation of a PC device in the custom PC platform."""
 
     def __init__(self, hass, entry_id, config):
         """Initialize the PC device."""
@@ -92,14 +137,16 @@ class PCDevice(MediaPlayerEntity):
         self._power_off_action = config[CONF_POWER_OFF_ACTION]
         self._enforce_lock = False  # Default to False, toggled via lock command
         self._muted = False  # Default to unmuted
+        self._volume_level = 0.5  # Default volume level
         self._attr_unique_id = f"pc_{self._device_name.lower()}"
         self._attr_name = f"PC {self._device_name}"
-        self._state = MediaPlayerState.ON
+        self._state = STATE_ON
         self._attributes = {
-            ATTR_VOLUME_LEVEL: 0.5,
+            ATTR_VOLUME_LEVEL: self._volume_level,
             ATTR_ACTIVE_WINDOW: "Notepad",
             ATTR_SESSION_STATE: "unlocked",
-            "enforce_lock": self._enforce_lock
+            "enforce_lock": self._enforce_lock,
+            "muted": self._muted
         }
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._device_name.lower())},
@@ -107,12 +154,6 @@ class PCDevice(MediaPlayerEntity):
             "manufacturer": "Home Assistant",
             "model": "PC"
         }
-        self._attr_supported_features = (
-            MediaPlayerEntity.SUPPORT_TURN_ON
-            | MediaPlayerEntity.SUPPORT_TURN_OFF
-            | MediaPlayerEntity.SUPPORT_VOLUME_SET
-            | MediaPlayerEntity.SUPPORT_VOLUME_MUTE
-        )
 
     async def async_added_to_hass(self):
         """Run when the entity is added to Home Assistant."""
@@ -144,34 +185,26 @@ class PCDevice(MediaPlayerEntity):
 
     @property
     def state(self):
-        """Return the state of the media player."""
+        """Return the state of the PC (on/off)."""
         return self._state
-
-    @property
-    def volume_level(self):
-        """Return the volume level of the media player (0..1)."""
-        return self._attributes[ATTR_VOLUME_LEVEL]
-
-    @property
-    def is_volume_muted(self):
-        """Return true if volume is muted."""
-        return self._muted
 
     @property
     def extra_state_attributes(self):
         """Return device specific state attributes."""
         self._attributes["enforce_lock"] = self._enforce_lock
+        self._attributes["muted"] = self._muted
+        self._attributes[ATTR_VOLUME_LEVEL] = self._volume_level
         return self._attributes
 
     async def async_turn_on(self, **kwargs):
         """Turn the PC on based on the configured action."""
         if self._power_on_action == POWER_ON_POWER:
             _LOGGER.info(f"Powering on PC {self._device_name}")
-            self._state = MediaPlayerState.ON
+            self._state = STATE_ON
             self._attributes[ATTR_SESSION_STATE] = "unlocked"
         elif self._power_on_action == POWER_ON_WAKE:
             _LOGGER.info(f"Sending wake command to PC {self._device_name}")
-            self._state = MediaPlayerState.ON
+            self._state = STATE_ON
             self._attributes[ATTR_SESSION_STATE] = "unlocked"
 
         # Enforce lock if active
@@ -186,15 +219,15 @@ class PCDevice(MediaPlayerEntity):
         """Turn the PC off based on the configured action."""
         if self._power_off_action == POWER_OFF_POWER:
             _LOGGER.info(f"Powering off PC {self._device_name}")
-            self._state = MediaPlayerState.OFF
+            self._state = STATE_OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
         elif self._power_off_action == POWER_OFF_HIBERNATE:
             _LOGGER.info(f"Hibernating PC {self._device_name}")
-            self._state = MediaPlayerState.OFF
+            self._state = STATE_OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
         elif self._power_off_action == POWER_OFF_SLEEP:
             _LOGGER.info(f"Sleeping PC {self._device_name}")
-            self._state = MediaPlayerState.OFF
+            self._state = STATE_OFF
             self._attributes[ATTR_SESSION_STATE] = "locked"
 
         await self._publish_state()
@@ -202,24 +235,27 @@ class PCDevice(MediaPlayerEntity):
 
     async def async_set_volume_level(self, volume):
         """Set the volume level of the PC."""
-        self._attributes[ATTR_VOLUME_LEVEL] = float(volume)
+        self._volume_level = float(volume)
+        self._attributes[ATTR_VOLUME_LEVEL] = self._volume_level
         await self._publish_state()
         self.async_write_ha_state()
 
-    async def async_mute_volume(self, mute):
+    async def async_mute(self, mute):
         """Mute or unmute the PC."""
         self._muted = mute
+        self._attributes["muted"] = self._muted
         _LOGGER.info(f"{'Muting' if mute else 'Unmuting'} PC {self._device_name}")
         await self._publish_state()
         self.async_write_ha_state()
 
     async def async_toggle_mute(self):
         """Toggle mute state."""
-        await self.async_mute_volume(not self._muted)
+        await self.async_mute(not self._muted)
 
     async def async_toggle_enforce_lock(self):
         """Toggle the enforced lock state."""
         self._enforce_lock = not self._enforce_lock
+        self._attributes["enforce_lock"] = self._enforce_lock
         _LOGGER.info(f"Enforced lock for PC {self._device_name} set to {self._enforce_lock}")
         if self._enforce_lock and self._attributes[ATTR_SESSION_STATE] == "unlocked":
             self._attributes[ATTR_SESSION_STATE] = "locked"
@@ -228,7 +264,7 @@ class PCDevice(MediaPlayerEntity):
 
     async def _publish_state(self):
         """Publish the current state to the MQTT update topic."""
-        state = "ON" if self._state == MediaPlayerState.ON else "OFF"
+        state = self._state
         payload = {
             "entity_id": f"PC.{self._device_name}",
             "state": state,
@@ -242,30 +278,3 @@ class PCDevice(MediaPlayerEntity):
             await mqtt.async_publish(self.hass, topic, payload_str)
         except (TypeError, ValueError) as e:
             _LOGGER.error(f"Failed to serialize state to JSON for {topic}: {e}")
-
-async def async_unload_entry(hass, entry):
-    """Unload the PC device platform."""
-    _LOGGER.debug(f"Unloading media_player platform for entry {entry.entry_id}")
-    try:
-        # Unsubscribe from MQTT topics
-        if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-            unsubscribes = hass.data[DOMAIN][entry.entry_id].get("unsubscribes", [])
-            for unsubscribe in unsubscribes:
-                try:
-                    unsubscribe()
-                except Exception as e:
-                    pass
-            
-            # Clean up entry data
-            hass.data[DOMAIN][entry.entry_id].clear()
-        
-        # Remove entity from entities dict if it exists
-        if DOMAIN in hass.data and "entities" in hass.data[DOMAIN]:
-            if entry.entry_id in hass.data[DOMAIN]["entities"]:
-                hass.data[DOMAIN]["entities"].pop(entry.entry_id, None)
-                _LOGGER.debug(f"Removed entity for {entry.entry_id} from entities dict")
-        
-        return True
-    except Exception as e:
-        _LOGGER.error(f"Error unloading entry {entry.entry_id}: {e}")
-        return False

@@ -6,7 +6,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player"]  # Use the media_player platform instead of custom pc platform
+PLATFORMS = ["pc"]  # Use the custom pc platform instead of media_player
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the PC component."""
