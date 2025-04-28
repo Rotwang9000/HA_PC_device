@@ -1,7 +1,7 @@
 {
   "domain": "pc",
   "name": "PC Device Amalgamation",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "documentation": "https://github.com/Rotwang9000/HA_PC_device#readme",
   "requirements": [],
   "dependencies": ["mqtt"],

@@ -1,6 +1,6 @@
 import logging
 from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.loader import async_get_integration
 from .const import DOMAIN
 
@@ -66,8 +66,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PC device from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
+    # Check if Home Assistant has already marked this entry as being in setup progress
+    # This can happen if HA's internal state was set before our guard check.
+    if entry.state is ConfigEntryState.SETUP_IN_PROGRESS:
+        _LOGGER.warning("Entry %s is already marked as SETUP_IN_PROGRESS by Home Assistant; aborting duplicate call", entry.entry_id)
+        return False
+
     # Ensure we have a set tracking pending setups – doing this *before* the guard
-    # avoids a race where two concurrent calls both saw the list missing.
     pending: set[str] = hass.data[DOMAIN].setdefault("pending_setups", set())
 
     # Guard against a concurrent setup already in progress for this entry.
