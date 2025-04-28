@@ -8,6 +8,9 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.components import mqtt
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.components.number import NumberEntity
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.button import ButtonEntity
 from .const import (
 	DOMAIN,
 	CONF_DEVICE_NAME,
@@ -30,18 +33,30 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 	_LOGGER.debug("Device name: %s", device_name)
 	
 	try:
-		# Create entity
+		# Create main entity
 		entity = ComputerDevice(hass, config_entry.entry_id, config_entry.data)
-		async_add_entities([entity])
-		_LOGGER.debug("Added entity %s to Home Assistant", entity.entity_id)
+
+		# Create additional entities
+		volume_entity = ComputerVolumeEntity(hass, config_entry.entry_id, config_entry.data, entity)
+		mute_entity = ComputerMuteEntity(hass, config_entry.entry_id, config_entry.data, entity)
+		lock_entity = ComputerLockButton(hass, config_entry.entry_id, config_entry.data, entity)
+		
+		# Add all entities
+		async_add_entities([entity, volume_entity, mute_entity, lock_entity])
+		_LOGGER.debug("Added entities for Computer %s to Home Assistant", device_name)
 
 		# Store entity for later access
 		hass.data.setdefault(DOMAIN, {})
 		if "entities" not in hass.data[DOMAIN]:
 			hass.data[DOMAIN]["entities"] = {}
-		hass.data[DOMAIN]["entities"][config_entry.entry_id] = entity
+		hass.data[DOMAIN]["entities"][config_entry.entry_id] = {
+			"main": entity,
+			"volume": volume_entity,
+			"mute": mute_entity,
+			"lock": lock_entity
+		}
 	except Exception as e:
-		_LOGGER.error("Failed to create Computer entity: %s", e)
+		_LOGGER.error("Failed to create Computer entities: %s", e)
 		raise
 
 	# Register device in registry
@@ -82,12 +97,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 				await entity.async_turn_off()
 		elif msg.topic == lock_topic:
 			await entity.async_toggle_enforce_lock()
+			await lock_entity.async_update_state()
 		elif msg.topic == mute_topic:
 			await entity.async_toggle_mute()
+			await mute_entity.async_update_state()
 		elif msg.topic == setvolume_topic:
 			try:
 				volume = float(payload)
 				await entity.async_set_volume_level(volume)
+				await volume_entity.async_update_state()
 			except ValueError as e:
 				_LOGGER.error("Invalid volume value received: %s, error: %s", payload, e)
 
@@ -145,6 +163,7 @@ class ComputerDevice(Entity):
 		self._volume_level = 0.5
 		self._attr_unique_id = f"computer_{self._device_name.lower()}"
 		self._attr_name = f"Computer {self._device_name}"
+		self._attr_entity_category = None  # Primary entity, not a configuration entity
 		self._state = STATE_ON
 		self._attributes = {
 			ATTR_VOLUME_LEVEL: self._volume_level,
@@ -282,4 +301,93 @@ class ComputerDevice(Entity):
 			payload_str = json.dumps(payload)
 			await mqtt.async_publish(self.hass, topic, payload_str)
 		except (TypeError, ValueError) as e:
-			_LOGGER.error("Failed to serialize state to JSON for %s: %s", topic, e) 
+			_LOGGER.error("Failed to serialize state to JSON for %s: %s", topic, e)
+
+class ComputerVolumeEntity(NumberEntity):
+	"""Volume control entity for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize volume entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"{self.parent._attr_unique_id}_volume"
+		self._attr_name = f"{self.parent._attr_name} Volume"
+		self._attr_native_min_value = 0.0
+		self._attr_native_max_value = 1.0
+		self._attr_native_step = 0.01
+		self._attr_device_info = self.parent._attr_device_info
+		self._attr_icon = "mdi:volume-high"
+		self._attr_device_class = "volume"  # Custom device class for volume
+		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+	@property
+	def native_value(self):
+		"""Return current volume level."""
+		return self.parent._volume_level
+		
+	async def async_set_native_value(self, value):
+		"""Set new volume level."""
+		await self.parent.async_set_volume_level(value)
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state()
+
+class ComputerMuteEntity(SwitchEntity):
+	"""Mute control entity for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize mute entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"{self.parent._attr_unique_id}_mute"
+		self._attr_name = f"{self.parent._attr_name} Mute"
+		self._attr_device_info = self.parent._attr_device_info
+		self._attr_icon = "mdi:volume-mute"
+		self._attr_device_class = "switch"
+		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+	@property
+	def is_on(self):
+		"""Return true if muted."""
+		return self.parent._muted
+		
+	async def async_turn_on(self, **kwargs):
+		"""Turn on mute."""
+		await self.parent.async_mute(True)
+		
+	async def async_turn_off(self, **kwargs):
+		"""Turn off mute."""
+		await self.parent.async_mute(False)
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state()
+
+class ComputerLockButton(ButtonEntity):
+	"""Lock control button for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize lock button entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"{self.parent._attr_unique_id}_lock"
+		self._attr_name = f"{self.parent._attr_name} Lock"
+		self._attr_device_info = self.parent._attr_device_info
+		self._attr_icon = "mdi:lock"
+		self._attr_device_class = "lock"
+		self._attr_entity_category = None  # This is a primary control, not configuration
+		
+	async def async_press(self):
+		"""Handle button press."""
+		await self.parent.async_toggle_enforce_lock()
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state() 

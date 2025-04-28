@@ -24,14 +24,14 @@ const char* mqtt_pass = "LilyLola";
 struct Entity {
   const char* entityId;
   const char* friendlyName;
-  const char* domain; // "light", "media_player", or "PC"
+  const char* domain; // "light", "media_player", or "computer"
 };
 
 const Entity entities[] = {
   {"light.gold_light", "Gold Light", "light"},
   {"light.led_flood_light", "Living Room Flood", "light"},
   {"media_player.lgnano_55", "LG Nano 55", "media_player"},
-  {"PC.FelixLaptop", "Felix Laptop", "PC"}
+  {"computer.FelixLaptop", "Felix Laptop", "computer"}
 };
 const int numEntities = sizeof(entities) / sizeof(entities[0]);
 int currentEntityIndex = 0;
@@ -45,8 +45,8 @@ struct MqttTopics {
   String volume;
   String source;
   String update;
-  String mute;      // For PC
-  String lock;      // For PC
+  String mute;      // For computer
+  String lock;      // For computer
 };
 
 MqttTopics topics;
@@ -73,11 +73,15 @@ void updateTopics() {
     topics.hs = "";
     topics.mute = "";
     topics.lock = "";
-  } else if (strcmp(entity.domain, "PC") == 0) {
-    // Use the number entity for volume setting
-    topics.volume = "homeassistant/number/felixlaptop_felixlaptop_volume/set";
-    topics.mute = "homeassistant/button/felixlaptop_felixlaptop_mute/action";
-    topics.lock = "homeassistant/button/felixlaptop_felixlaptop_lock/action";
+  } else if (strcmp(entity.domain, "computer") == 0) {
+    // Use the correct MQTT topic for computer integration
+    String computerBase = "homeassistant/Computer/Computer." + String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1);
+    topics.command = computerBase + "/set";
+    topics.requestState = computerBase + "/request_state";
+    topics.update = computerBase + "/update";
+    topics.volume = computerBase + "/setvolume";
+    topics.mute = computerBase + "/mute";
+    topics.lock = computerBase + "/lock";
     topics.brightness = "";
     topics.hs = "";
     topics.source = "";
@@ -134,11 +138,11 @@ bool entityStates[numEntities] = {false};
 int displayBrightness[numEntities] = {128}; // For lights
 int targetBrightness[numEntities] = {128};  // For lights
 int colorIndices[numEntities] = {0};        // For lights
-int volumeLevels[numEntities] = {13};       // For TV and PC (0-100)
-int targetVolumeLevels[numEntities] = {13}; // For TV and PC
+int volumeLevels[numEntities] = {13};       // For TV and computer (0-100)
+int targetVolumeLevels[numEntities] = {13}; // For TV and computer
 bool stateReceived[numEntities] = {false};
-String pcActiveWindow = "";                 // For PC active window
-String pcSessionState = "unknown";          // For PC lock state (locked/unlocked)
+String pcActiveWindow = "";                 // For computer active window
+String pcSessionState = "unknown";          // For computer lock state (locked/unlocked)
 
 // Variables
 bool connected = false;
@@ -179,13 +183,13 @@ void onKnobLeftEventCallback(int count, void *usr_data) {
   }
 
   const Entity& entity = entities[currentEntityIndex];
-  // For PC, allow volume adjustment if unlocked, regardless of entityStates
-  bool canAdjust = (strcmp(entity.domain, "PC") == 0 && pcSessionState == "unlocked") || 
-                   (strcmp(entity.domain, "PC") != 0 && entityStates[currentEntityIndex]);
+  // For computer, allow volume adjustment if unlocked, regardless of entityStates
+  bool canAdjust = (strcmp(entity.domain, "computer") == 0 && pcSessionState == "unlocked") || 
+                   (strcmp(entity.domain, "computer") != 0 && entityStates[currentEntityIndex]);
   if (!canAdjust) {
     Serial.print("Knob left event ignored for ");
     Serial.print(entity.entityId);
-    Serial.print(": PC locked or entity state is off (");
+    Serial.print(": computer locked or entity state is off (");
     Serial.print(entityStates[currentEntityIndex] ? "on" : "off");
     Serial.println(")");
     return;
@@ -221,13 +225,13 @@ void onKnobRightEventCallback(int count, void *usr_data) {
   }
 
   const Entity& entity = entities[currentEntityIndex];
-  // For PC, allow volume adjustment if unlocked, regardless of entityStates
-  bool canAdjust = (strcmp(entity.domain, "PC") == 0 && pcSessionState == "unlocked") || 
-                   (strcmp(entity.domain, "PC") != 0 && entityStates[currentEntityIndex]);
+  // For computer, allow volume adjustment if unlocked, regardless of entityStates
+  bool canAdjust = (strcmp(entity.domain, "computer") == 0 && pcSessionState == "unlocked") || 
+                   (strcmp(entity.domain, "computer") != 0 && entityStates[currentEntityIndex]);
   if (!canAdjust) {
     Serial.print("Knob right event ignored for ");
     Serial.print(entity.entityId);
-    Serial.print(": PC locked or entity state is off (");
+    Serial.print(": computer locked or entity state is off (");
     Serial.print(entityStates[currentEntityIndex] ? "on" : "off");
     Serial.println(")");
     return;
@@ -460,8 +464,8 @@ void loop() {
   bool currentLeftButtonState = digitalRead(leftButton);
 
   const Entity& entity = entities[currentEntityIndex];
-  if (strcmp(entity.domain, "PC") == 0) {
-    // PC-specific controls
+  if (strcmp(entity.domain, "computer") == 0) {
+    // computer-specific controls
     if (currentPushButtonState != lastPushButtonState && currentPushButtonState == LOW) {
       // Dial push: mute
       Serial.print("Dial push detected, publishing lock command to ");
@@ -671,7 +675,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       Serial.print(",");
       Serial.println(s);
     }
-  } else if (strcmp(entity.domain, "media_player") == 0 || strcmp(entity.domain, "PC") == 0) {
+  } else if (strcmp(entity.domain, "media_player") == 0 || strcmp(entity.domain, "computer") == 0) {
     if (doc.containsKey("volume_level") && !doc["volume_level"].isNull()) {
       volumeLevels[entityIndex] = (int)(doc["volume_level"].as<float>() * 100);
       if (lastKnobActivity == 0) {
@@ -696,8 +700,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
       Serial.print(": ");
       Serial.println(source);
     }
-    // PC-specific attributes
-    if (strcmp(entity.domain, "PC") == 0) {
+    // computer-specific attributes
+    if (strcmp(entity.domain, "computer") == 0) {
       if (doc.containsKey("activewindow") && !doc["activewindow"].isNull()) {
         pcActiveWindow = doc["activewindow"].as<String>();
         Serial.print("Active window updated for ");
@@ -877,7 +881,7 @@ void updateDisplay() {
     } else {
       display.print(tvSources[currentTvSourceIndex]);
     }
-  } else if (strcmp(entity.domain, "PC") == 0) {
+  } else if (strcmp(entity.domain, "computer") == 0) {
     display.print(F("Volume: "));
     display.print(targetVolumeLevels[currentEntityIndex]);
     display.println('%');
@@ -895,7 +899,7 @@ void updateDisplay() {
   }
   display.setCursor(0, 50);
   display.setTextSize(2);
-  if (strcmp(entity.domain, "PC") == 0) {
+  if (strcmp(entity.domain, "computer") == 0) {
     display.println(pcSessionState == "locked" ? "LOCK" : "UNLOCK");
   } else {
     display.println(entityStates[currentEntityIndex] ? " ON" : " OFF");
