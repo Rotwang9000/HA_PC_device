@@ -91,7 +91,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 	)
 
 	# Verify MQTT is available
-	if not await mqtt.async_wait_for_mqtt_client(hass, timeout=5):
+	if not await mqtt.async_wait_for_mqtt_client(hass):
 		_LOGGER.error("MQTT integration is not available or broker is not connected")
 		raise HomeAssistantError("MQTT integration is not available")
 
