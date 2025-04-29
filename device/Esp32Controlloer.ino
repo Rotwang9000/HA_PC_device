@@ -889,7 +889,7 @@ void updateDisplay() {
     int barWidth = map(displayBrightness[currentEntityIndex], 0, 255, 0, 100);
     display.drawRect(0, 30, 100, 10, SSD1306_WHITE);
     display.fillRect(0, 30, barWidth, 10, SSD1306_WHITE);
-    display.setCursor(0, 50);
+    display.setCursor(60, 50);
     display.print(colorNames[colorIndices[currentEntityIndex]]);
   } else if (strcmp(entity.domain, "media_player") == 0) {
     display.print(F("Volume: "));

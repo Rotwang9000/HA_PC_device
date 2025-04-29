@@ -56,6 +56,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		
 		# If async_add_entities is None, we need to register using entity component
 		if async_add_entities is None:
+			_LOGGER.debug("Using EntityComponent for entity registration as async_add_entities is None")
 			from homeassistant.helpers.entity_component import EntityComponent
 			component = EntityComponent(_LOGGER, DOMAIN, hass)
 			await component.async_add_entities([entity])
@@ -72,6 +73,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			await lock_component.async_add_entities([lock_button])
 			await enforce_lock_component.async_add_entities([enforce_lock_entity])
 		else:
+			_LOGGER.debug("Using standard async_add_entities for entity registration")
 			# Standard setup flow
 			async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
 		
@@ -335,7 +337,7 @@ class ComputerVolumeEntity(NumberEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_volume_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_volume_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Volume"
 		self._attr_native_min_value = 0.0
 		self._attr_native_max_value = 1.0
@@ -372,7 +374,7 @@ class ComputerMuteEntity(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_mute_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_mute_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Mute"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:volume-mute"
@@ -408,7 +410,7 @@ class ComputerLockButton(ButtonEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_lock_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_lock_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock"
@@ -435,7 +437,7 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_enforce_lock_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_enforce_lock_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Enforce Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock-check"
