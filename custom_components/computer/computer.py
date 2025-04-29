@@ -42,11 +42,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		lock_button = ComputerLockButton(hass, config_entry.entry_id, config_entry.data, entity)
 		enforce_lock_entity = ComputerEnforceLockSwitch(hass, config_entry.entry_id, config_entry.data, entity)
 		
-		# Add all entities
-		async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
-		_LOGGER.debug("Added entities for Computer %s to Home Assistant", device_name)
-
-		# Store entity for later access
+		# Store entity for later access (before registration)
 		hass.data.setdefault(DOMAIN, {})
 		if "entities" not in hass.data[DOMAIN]:
 			hass.data[DOMAIN]["entities"] = {}
@@ -57,6 +53,29 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			"lock": lock_button,
 			"enforce_lock": enforce_lock_entity
 		}
+		
+		# If async_add_entities is None, we need to register using entity component
+		if async_add_entities is None:
+			from homeassistant.helpers.entity_component import EntityComponent
+			component = EntityComponent(_LOGGER, DOMAIN, hass)
+			await component.async_add_entities([entity])
+			
+			# Register sub-entities with their respective domains
+			from homeassistant.helpers.entity_component import EntityComponent
+			volume_component = EntityComponent(_LOGGER, "number", hass)
+			mute_component = EntityComponent(_LOGGER, "switch", hass)
+			lock_component = EntityComponent(_LOGGER, "button", hass)
+			enforce_lock_component = EntityComponent(_LOGGER, "switch", hass)
+			
+			await volume_component.async_add_entities([volume_entity])
+			await mute_component.async_add_entities([mute_entity])
+			await lock_component.async_add_entities([lock_button])
+			await enforce_lock_component.async_add_entities([enforce_lock_entity])
+		else:
+			# Standard setup flow
+			async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
+		
+		_LOGGER.debug("Added entities for Computer %s to Home Assistant", device_name)
 	except Exception as e:
 		_LOGGER.error("Failed to create Computer entities: %s", e)
 		raise
@@ -180,6 +199,8 @@ class ComputerDevice(Entity):
 			"manufacturer": "Home Assistant",
 			"model": "Computer"
 		}
+		# Make sure the entity_id follows the format domain.object_id
+		self.entity_id = f"computer.{self._device_name.lower()}"
 
 	async def async_added_to_hass(self):
 		"""Run when entity is added to Home Assistant."""
@@ -324,8 +345,10 @@ class ComputerVolumeEntity(NumberEntity):
 		self._attr_device_class = "volume"  # Custom device class for volume
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
-		# Custom entity_id format: computer.device_name.volume
-		self.entity_id = f"computer.{self._device_name.lower()}.volume"
+		# Explicitly set the entity_id with the correct domain (number)
+		# Format: domain.object_id
+		# For sub-entities, they should use their specific domain (like number, not computer)
+		self.entity_id = f"number.{self._device_name.lower()}_volume"
 		
 	@property
 	def native_value(self):
@@ -356,8 +379,8 @@ class ComputerMuteEntity(SwitchEntity):
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
-		# Custom entity_id format: computer.device_name.mute
-		self.entity_id = f"computer.{self._device_name.lower()}.mute"
+		# Explicitly set the entity_id with the correct domain (switch)
+		self.entity_id = f"switch.{self._device_name.lower()}_mute"
 		
 	@property
 	def is_on(self):
@@ -392,8 +415,8 @@ class ComputerLockButton(ButtonEntity):
 		self._attr_device_class = "lock"
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
-		# Custom entity_id format: computer.device_name.lock
-		self.entity_id = f"computer.{self._device_name.lower()}.lock"
+		# Explicitly set the entity_id with the correct domain (button)
+		self.entity_id = f"button.{self._device_name.lower()}_lock"
 		
 	async def async_press(self):
 		"""Handle button press."""
@@ -419,8 +442,8 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
 		
-		# Custom entity_id format: computer.device_name.enforce_lock
-		self.entity_id = f"computer.{self._device_name.lower()}.enforce_lock"
+		# Explicitly set the entity_id with the correct domain (switch)
+		self.entity_id = f"switch.{self._device_name.lower()}_enforce_lock"
 		
 	@property
 	def is_on(self):

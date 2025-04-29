@@ -196,98 +196,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 		_LOGGER.warning("Entry %s is already in LOADED state, returning success without setup", entry.entry_id)
 		return True
 	
-	# Register our platform manually rather than using async_forward_entry_setups
-	# Use the dedicated setup function for the computer platform
-	from .computer import async_setup_entry as setup_computer
-	
-	try:
-		# Import EntityComponent to properly register entities
-		from homeassistant.helpers.entity_component import EntityComponent
-		
-		# Create a simple entity component for our domain
-		component = EntityComponent(_LOGGER, DOMAIN, hass)
-		
-		# Create the entity directly
-		from .computer import ComputerDevice, ComputerVolumeEntity, ComputerMuteEntity, ComputerLockButton, ComputerEnforceLockSwitch
-		entity = ComputerDevice(hass, entry.entry_id, entry.data)
-		volume_entity = ComputerVolumeEntity(hass, entry.entry_id, entry.data, entity)
-		mute_entity = ComputerMuteEntity(hass, entry.entry_id, entry.data, entity)
-		lock_button = ComputerLockButton(hass, entry.entry_id, entry.data, entity)
-		enforce_lock_entity = ComputerEnforceLockSwitch(hass, entry.entry_id, entry.data, entity)
-		
-		# Add entity to Home Assistant through the component
-		await component.async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
-		
-		# Store the entity for MQTT control
-		hass.data.setdefault(DOMAIN, {})
-		if "entities" not in hass.data[DOMAIN]:
-			hass.data[DOMAIN]["entities"] = {}
-		hass.data[DOMAIN]["entities"][entry.entry_id] = {
-			"main": entity,
-			"volume": volume_entity, 
-			"mute": mute_entity,
-			"lock": lock_button,
-			"enforce_lock": enforce_lock_entity
-		}
+	# Use the proper forward_entry_setup pattern instead of direct entity registration
+	# This ensures the entity_ids are handled correctly by Home Assistant
+	from homeassistant.config_entries import ConfigEntry, HANDLERS
 
-		# Create the dict for entry.entry_id if it doesn't exist
-		if entry.entry_id not in hass.data[DOMAIN]:
-			hass.data[DOMAIN][entry.entry_id] = {}
-		# Copy entry data into the dict
-		for key, value in entry.data.items():
-			hass.data[DOMAIN][entry.entry_id][key] = value
-		
-		# Set up MQTT subscriptions
-		device_name = entry.data["device_name"]
-		from .computer import MQTT_BASE_TOPIC
-		
-		# Define MQTT topics
-		set_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/set"
-		lock_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/lock"
-		mute_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/mute"
-		setvolume_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/setvolume"
-		
-		# Handle MQTT messages
-		async def message_received(msg):
-			try:
-				payload = msg.payload.decode("utf-8") if isinstance(msg.payload, bytes) else str(msg.payload)
-				if msg.topic == set_topic:
-					if payload.upper() == "ON":
-						await entity.async_turn_on()
-					elif payload.upper() == "OFF":
-						await entity.async_turn_off()
-				elif msg.topic == lock_topic:
-					await entity.async_toggle_enforce_lock()
-					await enforce_lock_entity.async_update_state()
-				elif msg.topic == mute_topic:
-					await entity.async_toggle_mute()
-					await mute_entity.async_update_state()
-				elif msg.topic == setvolume_topic:
-					try:
-						volume = float(payload)
-						await entity.async_set_volume_level(volume)
-						await volume_entity.async_update_state()
-					except ValueError:
-						pass
-			except Exception as e:
-				_LOGGER.error("Error handling MQTT message: %s", e)
-		
-		# Subscribe to MQTT topics
-		from homeassistant.components import mqtt
-		unsubscribes = []
-		for topic in [set_topic, lock_topic, mute_topic, setvolume_topic]:
-			unsub = await mqtt.async_subscribe(hass, topic, message_received)
-			unsubscribes.append(unsub)
-		
-		# Store unsubscribe callbacks
-		hass.data[DOMAIN][entry.entry_id]["unsubscribes"] = unsubscribes
-		
-		_LOGGER.debug("Successfully initiated direct setup for Computer entry %s", entry.entry_id)
-	except Exception as e:
-		_LOGGER.error("Error setting up Computer entry %s: %s", entry.entry_id, str(e))
-		return False
+	# Register our domains
+	hass.data.setdefault(DOMAIN, {})
+	if entry.entry_id not in hass.data[DOMAIN]:
+		hass.data[DOMAIN][entry.entry_id] = {}
 	
-	# Return success immediately, the platform setup runs in background
+	# Copy entry data into the dict
+	for key, value in entry.data.items():
+		hass.data[DOMAIN][entry.entry_id][key] = value
+	
+	# Forward setup to computer platform
+	from .computer import async_setup_entry as setup_computer_platform
+	await setup_computer_platform(hass, entry, async_add_entities=None)
+	
+	_LOGGER.debug("Successfully completed setup for Computer entry %s", entry.entry_id)
 	return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
