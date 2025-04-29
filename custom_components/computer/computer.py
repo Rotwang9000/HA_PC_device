@@ -83,18 +83,28 @@ async def register_sub_entities(hass, config_entry):
 		if "volume" in entities:
 			volume_entity = entities["volume"]
 			_LOGGER.debug("Registering volume entity: %s", volume_entity.entity_id)
-			volume_entry = registry.async_get_or_create(
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
 				domain="number",
 				platform=DOMAIN,
 				unique_id=volume_entity.unique_id,
-				suggested_object_id=volume_entity.entity_id.split(".", 1)[1],
-				config_entry=config_entry
+				config_entry=config_entry,
+				suggested_object_id=volume_entity.entity_id.split('.', 1)[1]
 			)
-			hass.states.async_set(
-				volume_entity.entity_id, 
-				str(volume_entity.native_value), 
-				{"friendly_name": volume_entity.name, "icon": volume_entity.icon}
-			)
+			
+			# Set initial state
+			state_value = str(volume_entity.native_value)
+			attributes = {
+				"friendly_name": volume_entity.name,
+				"icon": volume_entity.icon,
+				"min": volume_entity.native_min_value,
+				"max": volume_entity.native_max_value,
+				"step": volume_entity.native_step,
+				"mode": "auto",
+				"unit_of_measurement": "%"
+			}
+			hass.states.async_set(volume_entity.entity_id, state_value, attributes)
 			
 			# Make sure it responds to service calls
 			async def volume_service_handler(call):
@@ -109,35 +119,33 @@ async def register_sub_entities(hass, config_entry):
 					_LOGGER.debug("Handling number.set_value service for %s with value %s", 
 						volume_entity.entity_id, vol_value)
 					await volume_entity.async_set_native_value(float(vol_value))
-					
-			# Use voluptuous schema to validate service call data
-			volume_schema = vol.Schema({
-				vol.Required("entity_id"): cv.entity_id,
-				vol.Required("value"): vol.Coerce(float)
-			})
 			
-			hass.services.async_register(
-				"number", "set_value", 
-				volume_service_handler, 
-				schema=volume_schema
-			)
+			# Use EntityComponent to properly register
+			from homeassistant.helpers.entity_component import EntityComponent
+			number_component = EntityComponent(_LOGGER, "number", hass)
+			await number_component.async_add_entities([volume_entity])
 		
 		# Mute entity (switch)
 		if "mute" in entities:
 			mute_entity = entities["mute"]
 			_LOGGER.debug("Registering mute entity: %s", mute_entity.entity_id)
-			mute_entry = registry.async_get_or_create(
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
 				domain="switch",
 				platform=DOMAIN,
 				unique_id=mute_entity.unique_id,
-				suggested_object_id=mute_entity.entity_id.split(".", 1)[1],
-				config_entry=config_entry
+				config_entry=config_entry,
+				suggested_object_id=mute_entity.entity_id.split('.', 1)[1]
 			)
-			hass.states.async_set(
-				mute_entity.entity_id, 
-				"on" if mute_entity.is_on else "off", 
-				{"friendly_name": mute_entity.name, "icon": mute_entity.icon}
-			)
+			
+			# Set initial state
+			state_value = "on" if mute_entity.is_on else "off"
+			attributes = {
+				"friendly_name": mute_entity.name,
+				"icon": mute_entity.icon
+			}
+			hass.states.async_set(mute_entity.entity_id, state_value, attributes)
 			
 			# Make sure it responds to service calls
 			async def mute_on_service_handler(call):
@@ -149,35 +157,32 @@ async def register_sub_entities(hass, config_entry):
 				"""Handle turn_off for mute entity."""
 				_LOGGER.debug("Handling switch.turn_off service for %s", mute_entity.entity_id)
 				await mute_entity.async_turn_off()
-				
-			hass.services.async_register(
-				"switch", "turn_on", 
-				mute_on_service_handler, 
-				schema={"entity_id": mute_entity.entity_id}
-			)
 			
-			hass.services.async_register(
-				"switch", "turn_off", 
-				mute_off_service_handler, 
-				schema={"entity_id": mute_entity.entity_id}
-			)
+			# Use EntityComponent to properly register  
+			from homeassistant.helpers.entity_component import EntityComponent
+			switch_component = EntityComponent(_LOGGER, "switch", hass)
+			await switch_component.async_add_entities([mute_entity])
 		
 		# Lock entity (button)
 		if "lock" in entities:
 			lock_entity = entities["lock"]
 			_LOGGER.debug("Registering lock entity: %s", lock_entity.entity_id)
-			lock_entry = registry.async_get_or_create(
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
 				domain="button",
 				platform=DOMAIN,
 				unique_id=lock_entity.unique_id,
-				suggested_object_id=lock_entity.entity_id.split(".", 1)[1],
-				config_entry=config_entry
+				config_entry=config_entry,
+				suggested_object_id=lock_entity.entity_id.split('.', 1)[1]
 			)
-			hass.states.async_set(
-				lock_entity.entity_id, 
-				"unknown", 
-				{"friendly_name": lock_entity.name, "icon": lock_entity.icon}
-			)
+			
+			# Set initial state
+			attributes = {
+				"friendly_name": lock_entity.name,
+				"icon": lock_entity.icon
+			}
+			hass.states.async_set(lock_entity.entity_id, "unknown", attributes)
 			
 			# Make sure it responds to service calls
 			async def lock_press_service_handler(call):
@@ -185,28 +190,32 @@ async def register_sub_entities(hass, config_entry):
 				_LOGGER.debug("Handling button.press service for %s", lock_entity.entity_id)
 				await lock_entity.async_press()
 				
-			hass.services.async_register(
-				"button", "press", 
-				lock_press_service_handler, 
-				schema={"entity_id": lock_entity.entity_id}
-			)
+			# Use EntityComponent to properly register
+			from homeassistant.helpers.entity_component import EntityComponent
+			button_component = EntityComponent(_LOGGER, "button", hass)
+			await button_component.async_add_entities([lock_entity])
 		
 		# Enforce lock entity (switch)
 		if "enforce_lock" in entities:
 			enforce_lock_entity = entities["enforce_lock"]
 			_LOGGER.debug("Registering enforce lock entity: %s", enforce_lock_entity.entity_id)
-			enforce_lock_entry = registry.async_get_or_create(
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
 				domain="switch",
 				platform=DOMAIN,
 				unique_id=enforce_lock_entity.unique_id,
-				suggested_object_id=enforce_lock_entity.entity_id.split(".", 1)[1],
-				config_entry=config_entry
+				config_entry=config_entry,
+				suggested_object_id=enforce_lock_entity.entity_id.split('.', 1)[1]
 			)
-			hass.states.async_set(
-				enforce_lock_entity.entity_id, 
-				"on" if enforce_lock_entity.is_on else "off", 
-				{"friendly_name": enforce_lock_entity.name, "icon": enforce_lock_entity.icon}
-			)
+			
+			# Set initial state
+			state_value = "on" if enforce_lock_entity.is_on else "off"
+			attributes = {
+				"friendly_name": enforce_lock_entity.name,
+				"icon": enforce_lock_entity.icon
+			}
+			hass.states.async_set(enforce_lock_entity.entity_id, state_value, attributes)
 			
 			# Make sure it responds to service calls
 			async def enforce_lock_on_service_handler(call):
@@ -219,17 +228,8 @@ async def register_sub_entities(hass, config_entry):
 				_LOGGER.debug("Handling switch.turn_off service for %s", enforce_lock_entity.entity_id)
 				await enforce_lock_entity.async_turn_off()
 				
-			hass.services.async_register(
-				"switch", "turn_on", 
-				enforce_lock_on_service_handler, 
-				schema={"entity_id": enforce_lock_entity.entity_id}
-			)
-			
-			hass.services.async_register(
-				"switch", "turn_off", 
-				enforce_lock_off_service_handler, 
-				schema={"entity_id": enforce_lock_entity.entity_id}
-			)
+			# Use EntityComponent to properly register (reuse previous component)
+			await switch_component.async_add_entities([enforce_lock_entity])
 		
 		_LOGGER.debug("Successfully registered all sub-entities")
 		return True
@@ -279,8 +279,18 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			_LOGGER.debug("Sub-entities will be registered separately via register_sub_entities")
 		else:
 			_LOGGER.debug("Using standard async_add_entities for entity registration")
-			# Standard setup flow
-			async_add_entities([entity, volume_entity, mute_entity, lock_button, enforce_lock_entity])
+			# Only register the main entity here - sub-entities get registered separately 
+			# to ensure they go to the proper domains
+			async_add_entities([entity])
+			
+			# Also call register_sub_entities to register them with their appropriate domains
+			from homeassistant.setup import async_setup_component
+			await async_setup_component(hass, "number", {})
+			await async_setup_component(hass, "switch", {})
+			await async_setup_component(hass, "button", {})
+			
+			# Register the sub-entities directly
+			await register_sub_entities(hass, config_entry)
 		
 		_LOGGER.debug("Added entities for Computer %s to Home Assistant", device_name)
 	except Exception as e:
@@ -575,7 +585,7 @@ class ComputerVolumeEntity(NumberEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self._device_name.lower()}_volume_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_volume"
 		self._attr_name = f"{self.parent._attr_name} Volume"
 		self._attr_native_min_value = 0.0
 		self._attr_native_max_value = 1.0
@@ -584,11 +594,12 @@ class ComputerVolumeEntity(NumberEntity):
 		self._attr_icon = "mdi:volume-high"
 		self._attr_device_class = "volume"  # Custom device class for volume
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		self._attr_available = True
 		
 		# Explicitly set the entity_id with the correct domain (number)
 		# Format: domain.object_id
 		# For sub-entities, they should use their specific domain (like number, not computer)
-		self.entity_id = f"number.{self._device_name.lower()}_volume"
+		self.entity_id = f"number.computer_{self._device_name.lower()}_volume"
 		
 	@property
 	def native_value(self):
@@ -612,15 +623,16 @@ class ComputerMuteEntity(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self._device_name.lower()}_mute_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_mute"
 		self._attr_name = f"{self.parent._attr_name} Mute"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:volume-mute"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		self._attr_available = True
 		
 		# Explicitly set the entity_id with the correct domain (switch)
-		self.entity_id = f"switch.{self._device_name.lower()}_mute"
+		self.entity_id = f"switch.computer_{self._device_name.lower()}_mute"
 		
 	@property
 	def is_on(self):
@@ -648,15 +660,16 @@ class ComputerLockButton(ButtonEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self._device_name.lower()}_lock_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_lock"
 		self._attr_name = f"{self.parent._attr_name} Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock"
 		self._attr_device_class = "lock"
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		self._attr_available = True
 		
 		# Explicitly set the entity_id with the correct domain (button)
-		self.entity_id = f"button.{self._device_name.lower()}_lock"
+		self.entity_id = f"button.computer_{self._device_name.lower()}_lock"
 		
 	async def async_press(self):
 		"""Handle button press."""
@@ -675,15 +688,16 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"computer_{self._device_name.lower()}_enforce_lock_{entry_id}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_enforce_lock"
 		self._attr_name = f"{self.parent._attr_name} Enforce Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock-check"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
+		self._attr_available = True
 		
 		# Explicitly set the entity_id with the correct domain (switch)
-		self.entity_id = f"switch.{self._device_name.lower()}_enforce_lock"
+		self.entity_id = f"switch.computer_{self._device_name.lower()}_enforce_lock"
 		
 	@property
 	def is_on(self):

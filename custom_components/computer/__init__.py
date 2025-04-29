@@ -223,10 +223,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	
 	# First make sure all required components are set up
 	if not hass.data.get(NUMBER_DOMAIN):
+		_LOGGER.debug("Setting up number component")
 		await async_setup_component(hass, NUMBER_DOMAIN, {})
 	if not hass.data.get(SWITCH_DOMAIN):
+		_LOGGER.debug("Setting up switch component")
 		await async_setup_component(hass, SWITCH_DOMAIN, {})
 	if not hass.data.get(BUTTON_DOMAIN):
+		_LOGGER.debug("Setting up button component")
 		await async_setup_component(hass, BUTTON_DOMAIN, {})
 	
 	# Register our sub-entities with Home Assistant
