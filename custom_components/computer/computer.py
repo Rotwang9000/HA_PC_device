@@ -182,7 +182,7 @@ class ComputerDevice(Entity):
 		self._enforce_lock = False
 		self._muted = False
 		self._volume_level = 0.5
-		self._attr_unique_id = f"computer_{self._device_name.lower()}"
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_{entry_id}"
 		self._attr_name = f"Computer {self._device_name}"
 		self._attr_entity_category = None  # Primary entity, not a configuration entity
 		self._state = STATE_ON
@@ -335,7 +335,7 @@ class ComputerVolumeEntity(NumberEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"{self.parent._attr_unique_id}_volume"
+		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_volume_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Volume"
 		self._attr_native_min_value = 0.0
 		self._attr_native_max_value = 1.0
@@ -372,7 +372,7 @@ class ComputerMuteEntity(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"{self.parent._attr_unique_id}_mute"
+		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_mute_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Mute"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:volume-mute"
@@ -408,7 +408,7 @@ class ComputerLockButton(ButtonEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"{self.parent._attr_unique_id}_lock"
+		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_lock_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock"
@@ -435,7 +435,7 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self._entry_id = entry_id
 		self._device_name = config[CONF_DEVICE_NAME]
 		self.parent = parent_entity
-		self._attr_unique_id = f"{self.parent._attr_unique_id}_enforce_lock"
+		self._attr_unique_id = f"computer_{self.parent._attr_unique_id}_enforce_lock_{entry_id}"
 		self._attr_name = f"{self.parent._attr_name} Enforce Lock"
 		self._attr_device_info = self.parent._attr_device_info
 		self._attr_icon = "mdi:lock-check"

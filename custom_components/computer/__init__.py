@@ -179,7 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	
 	This implementation avoids Home Assistant's internal ConfigEntryState
 	management by using a different approach that doesn't trigger the
-	SETUP_IN_PROGRESS state conflicts.
+	SETUP_IN_PROGRESS state conflicts and ensures unique IDs for entities.
 	"""
 	_LOGGER.debug("Setting up Computer entry %s using custom approach", entry.entry_id)
 	
@@ -209,7 +209,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	for key, value in entry.data.items():
 		hass.data[DOMAIN][entry.entry_id][key] = value
 	
-	# Forward setup to computer platform
+	# Forward setup to computer platform with unique ID handling
 	from .computer import async_setup_entry as setup_computer_platform
 	await setup_computer_platform(hass, entry, async_add_entities=None)
 	
