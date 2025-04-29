@@ -11,6 +11,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.number import NumberEntity
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.components.button import ButtonEntity
+import voluptuous as vol
+from homeassistant.helpers import config_validation as cv
 from .const import (
 	DOMAIN,
 	CONF_DEVICE_NAME,
@@ -24,6 +26,216 @@ _LOGGER = logging.getLogger(__name__)
 
 # Constants for MQTT topics
 MQTT_BASE_TOPIC = "homeassistant/Computer"
+
+async def register_sub_entities(hass, config_entry):
+	"""Register sub-entities directly with Home Assistant."""
+	_LOGGER.debug("Registering sub-entities for Computer")
+	
+	# Get the stored entities from DOMAIN data
+	entities = hass.data.get(DOMAIN, {}).get("entities", {}).get(config_entry.entry_id, {})
+	if not entities or not isinstance(entities, dict):
+		_LOGGER.error("No entities found for entry %s or invalid structure", config_entry.entry_id)
+		return False
+	
+	try:
+		# Get entity registry
+		from homeassistant.helpers import entity_registry as er
+		registry = er.async_get(hass)
+		
+		# Add state listeners for main entity to update its sub-entities
+		main_entity = entities.get("main")
+		if main_entity:
+			_LOGGER.debug("Setting up state listeners for main entity: %s", main_entity.entity_id)
+			
+			async def handle_main_state_change(event):
+				"""Handle state changes of the main entity and update sub-entities if needed."""
+				new_state = event.data.get("new_state")
+				if new_state is None:
+					return
+					
+				# Check if we need to update the sub-entities
+				attributes = new_state.attributes
+				
+				# Update volume if it's changed
+				if "volume" in entities and ATTR_VOLUME_LEVEL in attributes:
+					volume_entity = entities["volume"]
+					await volume_entity.async_update_state()
+				
+				# Update mute if it's changed
+				if "mute" in entities and "muted" in attributes:
+					mute_entity = entities["mute"]
+					await mute_entity.async_update_state()
+				
+				# Update enforce_lock if it's changed
+				if "enforce_lock" in entities and "enforce_lock" in attributes:
+					enforce_lock_entity = entities["enforce_lock"]
+					await enforce_lock_entity.async_update_state()
+			
+			# Track state changes for the main entity
+			from homeassistant.helpers.event import async_track_state_change_event
+			async_track_state_change_event(
+				hass,
+				[main_entity.entity_id],
+				handle_main_state_change
+			)
+		
+		# Volume entity (number)
+		if "volume" in entities:
+			volume_entity = entities["volume"]
+			_LOGGER.debug("Registering volume entity: %s", volume_entity.entity_id)
+			volume_entry = registry.async_get_or_create(
+				domain="number",
+				platform=DOMAIN,
+				unique_id=volume_entity.unique_id,
+				suggested_object_id=volume_entity.entity_id.split(".", 1)[1],
+				config_entry=config_entry
+			)
+			hass.states.async_set(
+				volume_entity.entity_id, 
+				str(volume_entity.native_value), 
+				{"friendly_name": volume_entity.name, "icon": volume_entity.icon}
+			)
+			
+			# Make sure it responds to service calls
+			async def volume_service_handler(call):
+				"""Handle services for volume entity."""
+				vol_value = call.data.get("value")
+				entity_id = call.data.get("entity_id")
+				
+				if entity_id != volume_entity.entity_id:
+					return
+					
+				if vol_value is not None:
+					_LOGGER.debug("Handling number.set_value service for %s with value %s", 
+						volume_entity.entity_id, vol_value)
+					await volume_entity.async_set_native_value(float(vol_value))
+					
+			# Use voluptuous schema to validate service call data
+			volume_schema = vol.Schema({
+				vol.Required("entity_id"): cv.entity_id,
+				vol.Required("value"): vol.Coerce(float)
+			})
+			
+			hass.services.async_register(
+				"number", "set_value", 
+				volume_service_handler, 
+				schema=volume_schema
+			)
+		
+		# Mute entity (switch)
+		if "mute" in entities:
+			mute_entity = entities["mute"]
+			_LOGGER.debug("Registering mute entity: %s", mute_entity.entity_id)
+			mute_entry = registry.async_get_or_create(
+				domain="switch",
+				platform=DOMAIN,
+				unique_id=mute_entity.unique_id,
+				suggested_object_id=mute_entity.entity_id.split(".", 1)[1],
+				config_entry=config_entry
+			)
+			hass.states.async_set(
+				mute_entity.entity_id, 
+				"on" if mute_entity.is_on else "off", 
+				{"friendly_name": mute_entity.name, "icon": mute_entity.icon}
+			)
+			
+			# Make sure it responds to service calls
+			async def mute_on_service_handler(call):
+				"""Handle turn_on for mute entity."""
+				_LOGGER.debug("Handling switch.turn_on service for %s", mute_entity.entity_id)
+				await mute_entity.async_turn_on()
+				
+			async def mute_off_service_handler(call):
+				"""Handle turn_off for mute entity."""
+				_LOGGER.debug("Handling switch.turn_off service for %s", mute_entity.entity_id)
+				await mute_entity.async_turn_off()
+				
+			hass.services.async_register(
+				"switch", "turn_on", 
+				mute_on_service_handler, 
+				schema={"entity_id": mute_entity.entity_id}
+			)
+			
+			hass.services.async_register(
+				"switch", "turn_off", 
+				mute_off_service_handler, 
+				schema={"entity_id": mute_entity.entity_id}
+			)
+		
+		# Lock entity (button)
+		if "lock" in entities:
+			lock_entity = entities["lock"]
+			_LOGGER.debug("Registering lock entity: %s", lock_entity.entity_id)
+			lock_entry = registry.async_get_or_create(
+				domain="button",
+				platform=DOMAIN,
+				unique_id=lock_entity.unique_id,
+				suggested_object_id=lock_entity.entity_id.split(".", 1)[1],
+				config_entry=config_entry
+			)
+			hass.states.async_set(
+				lock_entity.entity_id, 
+				"unknown", 
+				{"friendly_name": lock_entity.name, "icon": lock_entity.icon}
+			)
+			
+			# Make sure it responds to service calls
+			async def lock_press_service_handler(call):
+				"""Handle press for lock button entity."""
+				_LOGGER.debug("Handling button.press service for %s", lock_entity.entity_id)
+				await lock_entity.async_press()
+				
+			hass.services.async_register(
+				"button", "press", 
+				lock_press_service_handler, 
+				schema={"entity_id": lock_entity.entity_id}
+			)
+		
+		# Enforce lock entity (switch)
+		if "enforce_lock" in entities:
+			enforce_lock_entity = entities["enforce_lock"]
+			_LOGGER.debug("Registering enforce lock entity: %s", enforce_lock_entity.entity_id)
+			enforce_lock_entry = registry.async_get_or_create(
+				domain="switch",
+				platform=DOMAIN,
+				unique_id=enforce_lock_entity.unique_id,
+				suggested_object_id=enforce_lock_entity.entity_id.split(".", 1)[1],
+				config_entry=config_entry
+			)
+			hass.states.async_set(
+				enforce_lock_entity.entity_id, 
+				"on" if enforce_lock_entity.is_on else "off", 
+				{"friendly_name": enforce_lock_entity.name, "icon": enforce_lock_entity.icon}
+			)
+			
+			# Make sure it responds to service calls
+			async def enforce_lock_on_service_handler(call):
+				"""Handle turn_on for enforce lock entity."""
+				_LOGGER.debug("Handling switch.turn_on service for %s", enforce_lock_entity.entity_id)
+				await enforce_lock_entity.async_turn_on()
+				
+			async def enforce_lock_off_service_handler(call):
+				"""Handle turn_off for enforce lock entity."""
+				_LOGGER.debug("Handling switch.turn_off service for %s", enforce_lock_entity.entity_id)
+				await enforce_lock_entity.async_turn_off()
+				
+			hass.services.async_register(
+				"switch", "turn_on", 
+				enforce_lock_on_service_handler, 
+				schema={"entity_id": enforce_lock_entity.entity_id}
+			)
+			
+			hass.services.async_register(
+				"switch", "turn_off", 
+				enforce_lock_off_service_handler, 
+				schema={"entity_id": enforce_lock_entity.entity_id}
+			)
+		
+		_LOGGER.debug("Successfully registered all sub-entities")
+		return True
+	except Exception as e:
+		_LOGGER.error("Error registering sub-entities: %s", e)
+		return False
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
 	"""Set up the Computer device from a config entry."""
@@ -56,22 +268,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		
 		# If async_add_entities is None, we need to register using entity component
 		if async_add_entities is None:
-			_LOGGER.debug("Using EntityComponent for entity registration as async_add_entities is None")
-			from homeassistant.helpers.entity_component import EntityComponent
-			component = EntityComponent(_LOGGER, DOMAIN, hass)
-			await component.async_add_entities([entity])
+			_LOGGER.debug("Using simplified entity registration as async_add_entities is None")
 			
-			# Register sub-entities with their respective domains
+			# Register the main computer entity using its domain
 			from homeassistant.helpers.entity_component import EntityComponent
-			volume_component = EntityComponent(_LOGGER, "number", hass)
-			mute_component = EntityComponent(_LOGGER, "switch", hass)
-			lock_component = EntityComponent(_LOGGER, "button", hass)
-			enforce_lock_component = EntityComponent(_LOGGER, "switch", hass)
+			computer_component = EntityComponent(_LOGGER, DOMAIN, hass)
+			await computer_component.async_add_entities([entity])
 			
-			await volume_component.async_add_entities([volume_entity])
-			await mute_component.async_add_entities([mute_entity])
-			await lock_component.async_add_entities([lock_button])
-			await enforce_lock_component.async_add_entities([enforce_lock_entity])
+			# Sub-entities will be registered externally by the register_sub_entities function
+			_LOGGER.debug("Sub-entities will be registered separately via register_sub_entities")
 		else:
 			_LOGGER.debug("Using standard async_add_entities for entity registration")
 			# Standard setup flow
@@ -263,6 +468,13 @@ class ComputerDevice(Entity):
 
 		await self._publish_state()
 		self.async_write_ha_state()
+		
+		# Update sub-entities if they exist
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict):
+			for entity_type, entity in entities.items():
+				if entity_type != "main" and hasattr(entity, "async_update_state"):
+					await entity.async_update_state()
 
 	async def async_turn_off(self, **kwargs):
 		"""Turn the Computer off based on configured action."""
@@ -281,35 +493,61 @@ class ComputerDevice(Entity):
 
 		await self._publish_state()
 		self.async_write_ha_state()
+		
+		# Update sub-entities if they exist
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict):
+			for entity_type, entity in entities.items():
+				if entity_type != "main" and hasattr(entity, "async_update_state"):
+					await entity.async_update_state()
 
 	async def async_set_volume_level(self, volume):
-		"""Set the volume level of the Computer."""
-		self._volume_level = float(volume)
-		self._attributes[ATTR_VOLUME_LEVEL] = self._volume_level
-		await self._publish_state()
+		"""Set volume level."""
+		self._volume_level = volume
+		self._attributes[ATTR_VOLUME_LEVEL] = volume
+		self._attributes["muted"] = False  # Unmute when volume is changed
+		self._muted = False
 		self.async_write_ha_state()
+		await self._publish_state()
+		
+		# Update volume and mute entities if they exist
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict):
+			if "volume" in entities:
+				await entities["volume"].async_update_state()
+			if "mute" in entities:
+				await entities["mute"].async_update_state()
 
 	async def async_mute(self, mute):
-		"""Mute or unmute the Computer."""
+		"""Mute or unmute Computer."""
 		self._muted = mute
-		self._attributes["muted"] = self._muted
-		_LOGGER.info("%s Computer %s", "Muting" if mute else "Unmuting", self._device_name)
-		await self._publish_state()
+		self._attributes["muted"] = mute
 		self.async_write_ha_state()
+		await self._publish_state()
+		
+		# Update mute entity if it exists
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict) and "mute" in entities:
+			await entities["mute"].async_update_state()
 
 	async def async_toggle_mute(self):
 		"""Toggle mute state."""
 		await self.async_mute(not self._muted)
 
 	async def async_toggle_enforce_lock(self):
-		"""Toggle the enforced lock state."""
+		"""Toggle enforce lock."""
 		self._enforce_lock = not self._enforce_lock
 		self._attributes["enforce_lock"] = self._enforce_lock
-		_LOGGER.info("Enforced lock for Computer %s set to %s", self._device_name, self._enforce_lock)
-		if self._enforce_lock and self._attributes[ATTR_SESSION_STATE] == "unlocked":
-			self._attributes[ATTR_SESSION_STATE] = "locked"
-		await self._publish_state()
 		self.async_write_ha_state()
+		await self._publish_state()
+		
+		# Update enforce_lock entity if it exists
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict):
+			if "enforce_lock" in entities:
+				await entities["enforce_lock"].async_update_state()
+			if "lock" in entities:
+				await entities["lock"].async_update_state()
 
 	async def _publish_state(self):
 		"""Publish the current state to the MQTT update topic."""

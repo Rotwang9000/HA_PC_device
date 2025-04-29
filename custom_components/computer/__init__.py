@@ -196,10 +196,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 		_LOGGER.warning("Entry %s is already in LOADED state, returning success without setup", entry.entry_id)
 		return True
 	
-	# Use the proper forward_entry_setup pattern instead of direct entity registration
-	# This ensures the entity_ids are handled correctly by Home Assistant
-	from homeassistant.config_entries import ConfigEntry, HANDLERS
-
 	# Register our domains
 	hass.data.setdefault(DOMAIN, {})
 	if entry.entry_id not in hass.data[DOMAIN]:
@@ -209,9 +205,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 	for key, value in entry.data.items():
 		hass.data[DOMAIN][entry.entry_id][key] = value
 	
-	# Forward setup to computer platform with unique ID handling
+	# Forward setup to computer platform
 	from .computer import async_setup_entry as setup_computer_platform
 	await setup_computer_platform(hass, entry, async_add_entities=None)
+	
+	# Now set up all the required domains for sub-entities
+	# These will create the correct platform entities
+	from homeassistant.helpers.entity_platform import async_get_platforms
+	from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
+	from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN  
+	from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
+	
+	_LOGGER.debug("Setting up platform entities for entry %s", entry.entry_id)
+	
+	# Manually set up the required platforms to ensure sub-entities are registered
+	from homeassistant.setup import async_setup_component
+	
+	# First make sure all required components are set up
+	if not hass.data.get(NUMBER_DOMAIN):
+		await async_setup_component(hass, NUMBER_DOMAIN, {})
+	if not hass.data.get(SWITCH_DOMAIN):
+		await async_setup_component(hass, SWITCH_DOMAIN, {})
+	if not hass.data.get(BUTTON_DOMAIN):
+		await async_setup_component(hass, BUTTON_DOMAIN, {})
+	
+	# Register our sub-entities with Home Assistant
+	# This is done by calling specific helper functions from computer.py
+	from .computer import register_sub_entities
+	_LOGGER.debug("Registering sub-entities for entry %s", entry.entry_id)
+	try:
+		success = await register_sub_entities(hass, entry)
+		if success:
+			_LOGGER.debug("Successfully registered all sub-entities for entry %s", entry.entry_id)
+		else:
+			_LOGGER.warning("Some sub-entities may not have been registered for entry %s", entry.entry_id)
+	except Exception as e:
+		_LOGGER.error("Error registering sub-entities: %s", e)
 	
 	_LOGGER.debug("Successfully completed setup for Computer entry %s", entry.entry_id)
 	return True
