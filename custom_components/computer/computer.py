@@ -357,6 +357,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 	# Register device in registry
 	device_registry = dr.async_get(hass)
+	device_name_case = device_name  # Preserve original case for MQTT topics
 	device = device_registry.async_get_or_create(
 		config_entry_id=config_entry.entry_id,
 		identifiers={(DOMAIN, device_name.lower())},
@@ -398,7 +399,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		raise HomeAssistantError("MQTT integration is not available")
 
 	# Define MQTT topics
-	device_name_case = device_name  # Preserve original case for MQTT topics
 	
 	# Look for existing MQTT entities with the device name
 	mqtt_discovery_pattern = f"homeassistant/+/{device_name_case}/+/config"
