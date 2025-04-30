@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.number import NumberEntity
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.components.button import ButtonEntity
+from homeassistant.components.sensor import SensorEntity
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
 from .const import (
@@ -231,6 +232,58 @@ async def register_sub_entities(hass, config_entry):
 			# Use EntityComponent to properly register (reuse previous component)
 			await switch_component.async_add_entities([enforce_lock_entity])
 		
+		# Active Window entity (sensor)
+		if "active_window" in entities:
+			active_window_entity = entities["active_window"]
+			_LOGGER.debug("Registering active window entity: %s", active_window_entity.entity_id)
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
+				domain="sensor",
+				platform=DOMAIN,
+				unique_id=active_window_entity.unique_id,
+				config_entry=config_entry,
+				suggested_object_id=active_window_entity.entity_id.split('.', 1)[1]
+			)
+			
+			# Set initial state
+			attributes = {
+				"friendly_name": active_window_entity.name,
+				"icon": active_window_entity.icon
+			}
+			hass.states.async_set(active_window_entity.entity_id, active_window_entity.state, attributes)
+			
+			# Use EntityComponent to properly register
+			from homeassistant.helpers.entity_component import EntityComponent
+			sensor_component = EntityComponent(_LOGGER, "sensor", hass)
+			await sensor_component.async_add_entities([active_window_entity])
+		
+		# Session State entity (sensor)
+		if "session_state" in entities:
+			session_state_entity = entities["session_state"]
+			_LOGGER.debug("Registering session state entity: %s", session_state_entity.entity_id)
+			
+			# Ensure entity exists in registry properly
+			registry.async_get_or_create(
+				domain="sensor",
+				platform=DOMAIN,
+				unique_id=session_state_entity.unique_id,
+				config_entry=config_entry,
+				suggested_object_id=session_state_entity.entity_id.split('.', 1)[1]
+			)
+			
+			# Set initial state
+			attributes = {
+				"friendly_name": session_state_entity.name,
+				"icon": session_state_entity.icon
+			}
+			hass.states.async_set(session_state_entity.entity_id, session_state_entity.state, attributes)
+			
+			# Use EntityComponent to properly register
+			if 'sensor_component' not in locals():
+				sensor_component = EntityComponent(_LOGGER, "sensor", hass)
+			await sensor_component.async_add_entities([session_state_entity])
+		
 		_LOGGER.debug("Successfully registered all sub-entities")
 		return True
 	except Exception as e:
@@ -253,6 +306,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		mute_entity = ComputerMuteEntity(hass, config_entry.entry_id, config_entry.data, entity)
 		lock_button = ComputerLockButton(hass, config_entry.entry_id, config_entry.data, entity)
 		enforce_lock_entity = ComputerEnforceLockSwitch(hass, config_entry.entry_id, config_entry.data, entity)
+		active_window_entity = ComputerActiveWindowSensor(hass, config_entry.entry_id, config_entry.data, entity)
+		session_state_entity = ComputerSessionStateSensor(hass, config_entry.entry_id, config_entry.data, entity)
 		
 		# Store entity for later access (before registration)
 		hass.data.setdefault(DOMAIN, {})
@@ -263,7 +318,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			"volume": volume_entity,
 			"mute": mute_entity,
 			"lock": lock_button,
-			"enforce_lock": enforce_lock_entity
+			"enforce_lock": enforce_lock_entity,
+			"active_window": active_window_entity,
+			"session_state": session_state_entity
 		}
 		
 		# If async_add_entities is None, we need to register using entity component
@@ -288,6 +345,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			await async_setup_component(hass, "number", {})
 			await async_setup_component(hass, "switch", {})
 			await async_setup_component(hass, "button", {})
+			await async_setup_component(hass, "sensor", {})
 			
 			# Register the sub-entities directly
 			await register_sub_entities(hass, config_entry)
@@ -446,6 +504,11 @@ class ComputerDevice(Entity):
 			self._attributes[ATTR_SESSION_STATE] = "locked"
 			await self._publish_state()
 			self.async_write_ha_state()
+			
+			# Update session state sensor if it exists
+			entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+			if isinstance(entities, dict) and "session_state" in entities:
+				await entities["session_state"].async_update_state()
 
 	@property
 	def state(self):
@@ -558,6 +621,30 @@ class ComputerDevice(Entity):
 				await entities["enforce_lock"].async_update_state()
 			if "lock" in entities:
 				await entities["lock"].async_update_state()
+			if "session_state" in entities:
+				await entities["session_state"].async_update_state()
+				
+	async def set_active_window(self, window_name):
+		"""Set active window."""
+		self._attributes[ATTR_ACTIVE_WINDOW] = window_name
+		self.async_write_ha_state()
+		await self._publish_state()
+		
+		# Update active window entity if it exists
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict) and "active_window" in entities:
+			await entities["active_window"].async_update_state()
+			
+	async def set_session_state(self, state):
+		"""Set session state."""
+		self._attributes[ATTR_SESSION_STATE] = state
+		self.async_write_ha_state()
+		await self._publish_state()
+		
+		# Update session state entity if it exists
+		entities = self.hass.data.get(DOMAIN, {}).get("entities", {}).get(self._entry_id, {})
+		if isinstance(entities, dict) and "session_state" in entities:
+			await entities["session_state"].async_update_state()
 
 	async def _publish_state(self):
 		"""Publish the current state to the MQTT update topic."""
@@ -590,7 +677,12 @@ class ComputerVolumeEntity(NumberEntity):
 		self._attr_native_min_value = 0.0
 		self._attr_native_max_value = 1.0
 		self._attr_native_step = 0.01
-		self._attr_device_info = self.parent._attr_device_info
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
 		self._attr_icon = "mdi:volume-high"
 		self._attr_device_class = "volume"  # Custom device class for volume
 		self._attr_entity_category = None  # This is a primary control, not configuration
@@ -625,7 +717,12 @@ class ComputerMuteEntity(SwitchEntity):
 		self.parent = parent_entity
 		self._attr_unique_id = f"computer_{self._device_name.lower()}_mute"
 		self._attr_name = f"{self.parent._attr_name} Mute"
-		self._attr_device_info = self.parent._attr_device_info
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
 		self._attr_icon = "mdi:volume-mute"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
@@ -662,7 +759,12 @@ class ComputerLockButton(ButtonEntity):
 		self.parent = parent_entity
 		self._attr_unique_id = f"computer_{self._device_name.lower()}_lock"
 		self._attr_name = f"{self.parent._attr_name} Lock"
-		self._attr_device_info = self.parent._attr_device_info
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
 		self._attr_icon = "mdi:lock"
 		self._attr_device_class = "lock"
 		self._attr_entity_category = None  # This is a primary control, not configuration
@@ -690,7 +792,12 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		self.parent = parent_entity
 		self._attr_unique_id = f"computer_{self._device_name.lower()}_enforce_lock"
 		self._attr_name = f"{self.parent._attr_name} Enforce Lock"
-		self._attr_device_info = self.parent._attr_device_info
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
 		self._attr_icon = "mdi:lock-check"
 		self._attr_device_class = "switch"
 		self._attr_entity_category = None  # This is a primary control, not configuration
@@ -713,6 +820,84 @@ class ComputerEnforceLockSwitch(SwitchEntity):
 		"""Turn off enforce lock."""
 		if self.parent._enforce_lock:
 			await self.parent.async_toggle_enforce_lock()
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state() 
+
+class ComputerActiveWindowSensor(SensorEntity):
+	"""Active window sensor for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize active window sensor entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_active_window"
+		self._attr_name = f"{self.parent._attr_name} Active Window"
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
+		self._attr_icon = "mdi:application"
+		self._attr_entity_category = None  # Primary entity, not configuration
+		self._attr_available = True
+		
+		# Explicitly set the entity_id with the correct domain (sensor)
+		self.entity_id = f"sensor.computer_{self._device_name.lower()}_active_window"
+		
+	@property
+	def state(self):
+		"""Return current active window."""
+		return self.parent._attributes.get(ATTR_ACTIVE_WINDOW, "Unknown")
+		
+	@property
+	def extra_state_attributes(self):
+		"""Return additional attributes."""
+		return {}
+		
+	async def async_update_state(self):
+		"""Update the entity state."""
+		self.async_write_ha_state()
+
+class ComputerSessionStateSensor(SensorEntity):
+	"""Session state sensor for Computer."""
+	
+	def __init__(self, hass, entry_id, config, parent_entity):
+		"""Initialize session state sensor entity."""
+		self.hass = hass
+		self._entry_id = entry_id
+		self._device_name = config[CONF_DEVICE_NAME]
+		self.parent = parent_entity
+		self._attr_unique_id = f"computer_{self._device_name.lower()}_session_state"
+		self._attr_name = f"{self.parent._attr_name} Session State"
+		self._attr_device_info = {
+			"identifiers": {(DOMAIN, self._device_name.lower())},
+			"name": f"Computer {self._device_name}",
+			"manufacturer": "Home Assistant",
+			"model": "Computer"
+		}
+		self._attr_icon = "mdi:account-lock"
+		self._attr_entity_category = None  # Primary entity, not configuration
+		self._attr_available = True
+		
+		# Explicitly set the entity_id with the correct domain (sensor)
+		self.entity_id = f"sensor.computer_{self._device_name.lower()}_session_state"
+		
+	@property
+	def state(self):
+		"""Return current session state."""
+		return self.parent._attributes.get(ATTR_SESSION_STATE, "unknown")
+		
+	@property
+	def extra_state_attributes(self):
+		"""Return additional attributes."""
+		return {
+			"enforce_lock": self.parent._enforce_lock
+		}
 		
 	async def async_update_state(self):
 		"""Update the entity state."""
