@@ -12,6 +12,7 @@ Optionally it can also lockout using https://github.com/pantherale0/ha-familysaf
 - Exposes attributes: `volume_level`, `activewindow`, `sessionstate`.
 - Optional integration with Microsoft Family Safety for hard lockouts instead of power off.
 - Configurable via the Home Assistant Integrations page.
+- **NEW**: Compatible with HASS.Agent MQTT topics for immediate functionality.
 
 ## Installation
 
@@ -58,7 +59,7 @@ These entities are typically provided by the [Microsoft Family Safety](https://w
 5. Repeat for additional PCs (e.g., `emmaLaptop` and `FredPC`).
 
 ## Usage
-- **Entities:** After setup, you’ll have entities like `pc.emmalaptop` and `pc.fredpc`.
+- **Entities:** After setup, you'll have entities like `pc.emmalaptop` and `pc.fredpc`.
 - **State:** The entity state is `on` or `off`.
 - **Attributes:**
   - `volume_level`: The volume level (0.0 to 1.0).
@@ -72,16 +73,27 @@ These entities are typically provided by the [Microsoft Family Safety](https://w
 
 ## MQTT Topics
 The integration uses the following MQTT topics for communication:
-- **Set Command:** `homeassistant/PC/PC.<DeviceName>/set` (e.g., `homeassistant/PC/PC.emmaLaptop/set`)
+- **Set Command:** `homeassistant/Computer/Computer.<DeviceName>/set` (e.g., `homeassistant/Computer/Computer.emmaLaptop/set`)
   - Payload: `ON` or `OFF`
-- **Set Volume:** `homeassistant/PC/PC.<DeviceName>/setvolume` (e.g., `homeassistant/PC/PC.emmaLaptop/setvolume`)
+- **Set Volume:** `homeassistant/Computer/Computer.<DeviceName>/setvolume` (e.g., `homeassistant/Computer/Computer.emmaLaptop/setvolume`)
   - Payload: Volume level (0 to 100, scaled to 0.0-1.0 internally)
-- **Mute:** `homeassistant/PC/PC.<DeviceName>/mute` (e.g., `homeassistant/PC/PC.emmaLaptop/mute`)
+- **Mute:** `homeassistant/Computer/Computer.<DeviceName>/mute` (e.g., `homeassistant/Computer/Computer.emmaLaptop/mute`)
   - Payload: Any (triggers mute action)
-- **Lock:** `homeassistant/PC/PC.<DeviceName>/lock` (e.g., `homeassistant/PC/PC.emmaLaptop/lock`)
+- **Lock:** `homeassistant/Computer/Computer.<DeviceName>/lock` (e.g., `homeassistant/Computer/Computer.emmaLaptop/lock`)
   - Payload: Any (triggers lock action)
-- **State Update:** `homeassistant/PC/PC.<DeviceName>/update` (e.g., `homeassistant/PC/PC.emmaLaptop/update`)
+- **State Update:** `homeassistant/Computer/Computer.<DeviceName>/update` (e.g., `homeassistant/Computer/Computer.emmaLaptop/update`)
   - Payload: JSON with `entity_id`, `state`, `volume_level`, `activewindow`, `sessionstate`
+
+### HASS.Agent Compatibility
+The integration now also supports the MQTT topics used by HASS.Agent for seamless integration:
+- **Lock command:** `homeassistant/button/FelixLaptop/FelixLaptop_lock/command`
+- **Mute command:** `homeassistant/button/FelixLaptop/FelixLaptop_mute/command`
+- **Set volume command:** `homeassistant/button/FelixLaptop/FelixLaptop_setvolume/command`
+- **Active window state:** `homeassistant/sensor/FelixLaptop/FelixLaptop_activewindow/state`
+- **Session state:** `homeassistant/sensor/FelixLaptop/FelixLaptop_sessionstate/state`
+- **Current volume state:** `homeassistant/sensor/FelixLaptop/FelixLaptop_currentvolume/state`
+
+**Note:** These topics are case-sensitive. Make sure your HASS.Agent configuration uses the exact same capitalization.
 
 ## Example Configuration
 For `emmaLaptop` and `FredPC`:

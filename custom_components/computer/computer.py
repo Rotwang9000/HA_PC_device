@@ -26,7 +26,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Constants for MQTT topics
-MQTT_BASE_TOPIC = "homeassistant/Computer"
+MQTT_BASE_TOPIC = "homeassistant"
 
 async def register_sub_entities(hass, config_entry):
 	"""Register sub-entities directly with Home Assistant."""
@@ -357,13 +357,40 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 	# Register device in registry
 	device_registry = dr.async_get(hass)
-	device_registry.async_get_or_create(
+	device = device_registry.async_get_or_create(
 		config_entry_id=config_entry.entry_id,
 		identifiers={(DOMAIN, device_name.lower())},
 		name=f"Computer {device_name}",
 		manufacturer="Home Assistant",
-		model="Computer"
+		model="Computer",
+		# Add entry for the device in the device registry so it appears in the UI
+		suggested_area="Office"
 	)
+	
+	# Make sure device has the right entities associated with it
+	from homeassistant.helpers import entity_registry as er
+	entity_registry = er.async_get(hass)
+	
+	# Link existing MQTT entities to our device if they match the pattern
+	mqtt_entities = [
+		ent for ent in entity_registry.entities.values()
+		if (ent.platform == "mqtt" and 
+			device_name_case in ent.entity_id and 
+			ent.device_id != device.id)
+	]
+	
+	_LOGGER.debug("Found %d MQTT entities matching device name %s", len(mqtt_entities), device_name_case)
+	
+	# Associate entities with our device
+	for ent in mqtt_entities:
+		_LOGGER.debug("Associating entity %s with device %s", ent.entity_id, device.id)
+		try:
+			entity_registry.async_update_entity(
+				ent.entity_id,
+				device_id=device.id
+			)
+		except Exception as e:
+			_LOGGER.error("Failed to associate entity %s with device: %s", ent.entity_id, e)
 
 	# Verify MQTT is available
 	if not await mqtt.async_wait_for_mqtt_client(hass):
@@ -371,11 +398,26 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 		raise HomeAssistantError("MQTT integration is not available")
 
 	# Define MQTT topics
-	set_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/set"
-	lock_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/lock"
-	mute_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/mute"
-	setvolume_topic = f"{MQTT_BASE_TOPIC}/Computer.{device_name}/setvolume"
-
+	device_name_case = device_name  # Preserve original case for MQTT topics
+	
+	# Look for existing MQTT entities with the device name
+	mqtt_discovery_pattern = f"homeassistant/+/{device_name_case}/+/config"
+	_LOGGER.debug("Checking for MQTT discovery topics matching: %s", mqtt_discovery_pattern)
+	
+	# Default topics (old format)
+	set_topic = f"{MQTT_BASE_TOPIC}/Computer/Computer.{device_name}/set"
+	lock_topic = f"{MQTT_BASE_TOPIC}/Computer/Computer.{device_name}/lock"
+	mute_topic = f"{MQTT_BASE_TOPIC}/Computer/Computer.{device_name}/mute"
+	setvolume_topic = f"{MQTT_BASE_TOPIC}/Computer/Computer.{device_name}/setvolume"
+	activewindow_topic = f"homeassistant/sensor/{device_name_case}/{device_name_case}_activewindow/state"
+	sessionstate_topic = f"homeassistant/sensor/{device_name_case}/{device_name_case}_sessionstate/state"
+	currentvolume_topic = f"homeassistant/sensor/{device_name_case}/{device_name_case}_currentvolume/state"
+	
+	# HASS.Agent button command topics
+	lock_command_topic = f"homeassistant/button/{device_name_case}/{device_name_case}_lock/command"
+	mute_command_topic = f"homeassistant/button/{device_name_case}/{device_name_case}_mute/command"
+	setvolume_command_topic = f"homeassistant/button/{device_name_case}/{device_name_case}_setvolume/command"
+	
 	# Define MQTT message handler
 	async def message_received(msg):
 		"""Handle incoming MQTT messages."""
@@ -391,15 +433,34 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 				await entity.async_turn_on()
 			elif payload.upper() == "OFF":
 				await entity.async_turn_off()
-		elif msg.topic == lock_topic:
+		elif msg.topic == lock_topic or msg.topic == lock_command_topic:
+			_LOGGER.debug("Lock command received on %s", msg.topic)
 			await entity.async_toggle_enforce_lock()
 			await enforce_lock_entity.async_update_state()
-		elif msg.topic == mute_topic:
+		elif msg.topic == mute_topic or msg.topic == mute_command_topic:
+			_LOGGER.debug("Mute command received on %s", msg.topic)
 			await entity.async_toggle_mute()
 			await mute_entity.async_update_state()
-		elif msg.topic == setvolume_topic:
+		elif msg.topic == setvolume_topic or msg.topic == setvolume_command_topic:
 			try:
+				_LOGGER.debug("Volume command received on %s", msg.topic)
 				volume = float(payload)
+				await entity.async_set_volume_level(volume)
+				await volume_entity.async_update_state()
+			except ValueError as e:
+				_LOGGER.error("Invalid volume value received: %s, error: %s", payload, e)
+		elif msg.topic == activewindow_topic:
+			_LOGGER.debug("Active window update: %s", payload)
+			await entity.set_active_window(payload)
+			await active_window_entity.async_update_state()
+		elif msg.topic == sessionstate_topic:
+			_LOGGER.debug("Session state update: %s", payload)
+			await entity.set_session_state(payload)
+			await session_state_entity.async_update_state()
+		elif msg.topic == currentvolume_topic:
+			try:
+				_LOGGER.debug("Current volume update: %s", payload)
+				volume = float(payload) / 100.0  # Convert percentage to 0-1 range
 				await entity.async_set_volume_level(volume)
 				await volume_entity.async_update_state()
 			except ValueError as e:
@@ -407,24 +468,20 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 	# Subscribe to MQTT topics with timeout
 	try:
-		unsubscribe_set = await asyncio.wait_for(
-			mqtt.async_subscribe(hass, set_topic, message_received),
-			timeout=10
-		)
-		unsubscribe_lock = await asyncio.wait_for(
-			mqtt.async_subscribe(hass, lock_topic, message_received),
-			timeout=10
-		)
-		unsubscribe_mute = await asyncio.wait_for(
-			mqtt.async_subscribe(hass, mute_topic, message_received),
-			timeout=10
-		)
-		unsubscribe_setvolume = await asyncio.wait_for(
-			mqtt.async_subscribe(hass, setvolume_topic, message_received),
-			timeout=10
-		)
-		_LOGGER.debug("Subscribed to MQTT topics: %s, %s, %s, %s", 
-			set_topic, lock_topic, mute_topic, setvolume_topic)
+		subscriptions = [
+			await asyncio.wait_for(mqtt.async_subscribe(hass, set_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, lock_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, mute_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, setvolume_topic, message_received), timeout=10),
+			# Subscribe to HASS.Agent topics
+			await asyncio.wait_for(mqtt.async_subscribe(hass, lock_command_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, mute_command_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, setvolume_command_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, activewindow_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, sessionstate_topic, message_received), timeout=10),
+			await asyncio.wait_for(mqtt.async_subscribe(hass, currentvolume_topic, message_received), timeout=10),
+		]
+		_LOGGER.debug("Subscribed to all MQTT topics successfully")
 	except asyncio.TimeoutError as e:
 		_LOGGER.error("Timeout while subscribing to MQTT topics: %s", e)
 		raise HomeAssistantError("Failed to subscribe to MQTT topics due to timeout")
@@ -434,12 +491,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 	if config_entry.entry_id not in hass.data[DOMAIN]:
 		hass.data[DOMAIN][config_entry.entry_id] = {}
 	
-	hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = [
-		unsubscribe_set,
-		unsubscribe_lock,
-		unsubscribe_mute,
-		unsubscribe_setvolume
-	]
+	hass.data[DOMAIN][config_entry.entry_id]["unsubscribes"] = subscriptions
 	
 	_LOGGER.debug("Finished setup for config entry: %s", config_entry.entry_id)
 	return True
@@ -656,10 +708,37 @@ class ComputerDevice(Entity):
 			ATTR_ACTIVE_WINDOW: self._attributes[ATTR_ACTIVE_WINDOW],
 			ATTR_SESSION_STATE: self._attributes[ATTR_SESSION_STATE]
 		}
-		topic = f"{MQTT_BASE_TOPIC}/Computer.{self._device_name}/update"
+		topic = f"{MQTT_BASE_TOPIC}/Computer/Computer.{self._device_name}/update"
 		try:
 			payload_str = json.dumps(payload)
 			await mqtt.async_publish(self.hass, topic, payload_str)
+			
+			# Also publish to HASS.Agent specific topics
+			device_name_case = self._device_name  # Preserve case for HASS.Agent topics
+			
+			# Publish volume to HASS.Agent volume topic
+			volume_percent = int(self._attributes[ATTR_VOLUME_LEVEL] * 100)
+			await mqtt.async_publish(
+				self.hass, 
+				f"{MQTT_BASE_TOPIC}/sensor/{device_name_case}/{device_name_case}_currentvolume/state", 
+				str(volume_percent)
+			)
+			
+			# Publish active window to HASS.Agent active window topic
+			await mqtt.async_publish(
+				self.hass, 
+				f"{MQTT_BASE_TOPIC}/sensor/{device_name_case}/{device_name_case}_activewindow/state", 
+				self._attributes[ATTR_ACTIVE_WINDOW]
+			)
+			
+			# Publish session state to HASS.Agent session state topic
+			await mqtt.async_publish(
+				self.hass, 
+				f"{MQTT_BASE_TOPIC}/sensor/{device_name_case}/{device_name_case}_sessionstate/state", 
+				self._attributes[ATTR_SESSION_STATE]
+			)
+			
+			_LOGGER.debug("Published state updates to both Computer and HASS.Agent MQTT topics")
 		except (TypeError, ValueError) as e:
 			_LOGGER.error("Failed to serialize state to JSON for %s: %s", topic, e)
 
