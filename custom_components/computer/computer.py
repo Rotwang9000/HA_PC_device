@@ -1208,6 +1208,7 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 	"""Load entities for a specific platform manually to ensure they're available."""
 	from homeassistant.helpers.entity_platform import EntityPlatform
 	from homeassistant.helpers.entity_component import EntityComponent
+	from datetime import timedelta
 	
 	_LOGGER.warning("Manual entity registration being performed for platform %s", platform)
 	
@@ -1222,7 +1223,7 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 		platform_name=platform,
 		platform=None,
 		entity_namespace=None,
-		scan_interval=30,
+		scan_interval=timedelta(seconds=30),
 	)
 	
 	# Add entities to platform
