@@ -1222,6 +1222,7 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 		platform_name=platform,
 		platform=None,
 		entity_namespace=None,
+		scan_interval=30,
 	)
 	
 	# Add entities to platform
