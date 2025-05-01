@@ -468,7 +468,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 	_LOGGER.warning("HASS.Agent MQTT topics:")
 	_LOGGER.warning("  Sensors: %s, %s, %s", activewindow_topic, sessionstate_topic, currentvolume_topic)
 	_LOGGER.warning("  Buttons: %s, %s, %s, %s", lock_button_topic, mute_button_topic, setvolume_button_topic, publishallsensors_button_topic)
-	
+
 	# Define MQTT message handler
 	async def message_received(msg):
 		"""Handle incoming MQTT messages."""
@@ -767,7 +767,7 @@ class ComputerDevice(Entity):
 				await entities["lock"].async_update_state()
 			if "session_state" in entities:
 				await entities["session_state"].async_update_state()
-
+				
 	async def set_active_window(self, window_name):
 		"""Set active window."""
 		self._attributes[ATTR_ACTIVE_WINDOW] = window_name
@@ -916,7 +916,7 @@ class ComputerVolumeEntity(NumberEntity):
 		
 		# Also update through parent entity
 		await self.parent.async_set_volume_level(value)
-
+		
 	async def async_update_state(self):
 		"""Update the entity state."""
 		self.async_write_ha_state()
@@ -1221,7 +1221,6 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 		domain=domain,
 		platform_name=platform,
 		platform=None,
-		scan_interval=None,
 		entity_namespace=None,
 	)
 	
