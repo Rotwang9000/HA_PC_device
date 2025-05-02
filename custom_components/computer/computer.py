@@ -478,11 +478,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 			
 			# Log this to the Home Assistant logbook
 			from homeassistant.components import logbook
-			await logbook.async_log_event(
+			await logbook.async_log_entry(
 				hass,
 				"MQTT Message",
 				f"Received on {msg.topic}: {payload[:50]}{'...' if len(payload) > 50 else ''}",
-				entity_id=None,
 				domain="mqtt"
 			)
 		except (AttributeError, UnicodeDecodeError) as e:
@@ -891,7 +890,7 @@ class ComputerVolumeEntity(NumberEntity):
 		
 		# Log this action to the Home Assistant logbook
 		from homeassistant.components import logbook
-		await logbook.async_log_event(
+		await logbook.async_log_entry(
 			self.hass,
 			"Computer Volume",
 			f"Set volume to {int(value * 100)}% for {self.parent._device_name}",
@@ -958,7 +957,7 @@ class ComputerMuteEntity(SwitchEntity):
 		
 		# Log this action to the Home Assistant logbook
 		from homeassistant.components import logbook
-		await logbook.async_log_event(
+		await logbook.async_log_entry(
 			self.hass,
 			"Computer Mute",
 			f"Set mute ON for {self.parent._device_name} via MQTT",
@@ -989,7 +988,7 @@ class ComputerMuteEntity(SwitchEntity):
 		
 		# Log this action to the Home Assistant logbook
 		from homeassistant.components import logbook
-		await logbook.async_log_event(
+		await logbook.async_log_entry(
 			self.hass,
 			"Computer Mute",
 			f"Set mute OFF for {self.parent._device_name} via MQTT",
@@ -1050,7 +1049,7 @@ class ComputerLockButton(ButtonEntity):
 		
 		# Log this action to the Home Assistant logbook
 		from homeassistant.components import logbook
-		await logbook.async_log_event(
+		await logbook.async_log_entry(
 			self.hass,
 			"Computer Lock",
 			f"Sent lock command to {self.parent._device_name} via MQTT",
@@ -1209,8 +1208,36 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 	from homeassistant.helpers.entity_platform import EntityPlatform
 	from homeassistant.helpers.entity_component import EntityComponent
 	from datetime import timedelta
+	from homeassistant.helpers import entity_registry as er
 	
 	_LOGGER.warning("Manual entity registration being performed for platform %s", platform)
+	
+	# First check if any entities are already registered to avoid duplicates
+	registry = er.async_get(hass)
+	filtered_entities = []
+	
+	for entity in entities:
+		try:
+			# Check if entity is already registered
+			existing = registry.async_get_entity_id(domain, platform, entity.unique_id)
+			if existing:
+				_LOGGER.warning("Entity %s with unique_id %s is already registered as %s, skipping registration",
+					entity.entity_id, entity.unique_id, existing)
+				
+				# Still make sure the entity is available
+				entity._attr_available = True
+				entity.async_write_ha_state()
+				continue
+			
+			filtered_entities.append(entity)
+		except Exception as e:
+			_LOGGER.error("Error checking entity registration for %s: %s", entity.entity_id, e)
+			filtered_entities.append(entity)
+	
+	# If all entities were already registered, return early
+	if not filtered_entities:
+		_LOGGER.warning("All entities for platform %s are already registered, skipping", platform)
+		return True
 	
 	# Create or get component
 	component = EntityComponent(_LOGGER, domain, hass)
@@ -1227,15 +1254,13 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 	)
 	
 	# Add entities to platform
-	await platform_instance.async_add_entities(entities)
+	await platform_instance.async_add_entities(filtered_entities)
 	
 	# Run async_added_to_hass for each entity
-	for entity in entities:
+	for entity in filtered_entities:
 		if hasattr(entity, "async_added_to_hass") and callable(entity.async_added_to_hass):
 			if not entity.registry_entry:
 				try:
-					from homeassistant.helpers import entity_registry as er
-					registry = er.async_get(hass)
 					registry.async_get_or_create(
 						domain=entity.entity_id.split(".", 1)[0],
 						platform=platform,
@@ -1251,7 +1276,7 @@ async def async_load_platform_entities(hass, domain, platform, entities):
 				_LOGGER.error("Error adding entity %s to hass: %s", entity.entity_id, e)
 				
 	# Make entities available immediately
-	for entity in entities:
+	for entity in filtered_entities:
 		entity._attr_available = True
 		entity.async_write_ha_state()
 		
