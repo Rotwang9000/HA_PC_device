@@ -30,6 +30,7 @@ struct Entity {
 const Entity entities[] = {
   {"light.gold_light", "Gold Light", "light"},
   {"light.led_flood_light", "Living Room Flood", "light"},
+  {"light.bio_floodlight", "Bio Floodlight", "light"},
   {"media_player.lgnano_55", "LG Nano 55", "media_player"},
   {"computer.FelixLaptop", "Felix Laptop", "computer"}
 };
@@ -78,16 +79,17 @@ void updateTopics() {
     // Extract computer name from entity.entityId (format is "computer.computername")
     String computerName = String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1).toLowerCase();
     
-    // Use the direct MQTT format with button.computername_computername_*
-    topics.command = "homeassistant/switch/" + computerName + "/" + computerName + "_power/set";
-    topics.requestState = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state";
-    topics.update = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state";
-    
-    // Helper entity topics using the direct format 
-    topics.volume = "homeassistant/button/" + computerName + "/" + computerName + "_setvolume/action";
-    topics.mute = "homeassistant/button/" + computerName + "/" + computerName + "_mute/press";
-    topics.lock = "homeassistant/button/" + computerName + "/" + computerName + "_lock/press";
-    topics.enforceLock = "homeassistant/switch/" + computerName + "/" + computerName + "_enforce_lock/set";
+    // Use the computer domain for commands
+    String computerBaseTopic = "homeassistant/computer/" + computerName + "/";
+    topics.command = computerBaseTopic + "power/set";          // For ON/OFF
+    topics.volume = computerBaseTopic + "volume/action";       // For setting volume value
+    topics.mute = computerBaseTopic + "mute/press";          // For toggling mute
+    topics.lock = computerBaseTopic + "lock/press";          // For locking
+    topics.enforceLock = computerBaseTopic + "enforce_lock/set"; // For toggling enforce lock
+
+    // State topics remain the same (using sensor/switch domains for HA entities)
+    topics.requestState = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state"; // Or a more generic request?
+    topics.update = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state"; // Or a more generic update?
     
     topics.brightness = "";
     topics.hs = "";
