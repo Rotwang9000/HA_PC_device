@@ -516,7 +516,7 @@
 		"type": "function",
 		"z": "d8cfddba5c4a2613",
 		"name": "Combine Response",
-		"func": "msg.payload = {\n    \"entity_id\": msg.entity_id,\n    \"state\": msg.payload,\n    \"brightness\": msg.attributes.brightness || null,\n    \"hs_color\": msg.attributes.hs_color || null,\n    \"volume_level\": msg.attributes.volume_level || null,\n    \"source\": msg.attributes.source || null,\n    \"activewindow\": msg.attributes.activewindow || null,\n    \"sessionstate\": msg.attributes.sessionstate || null,\n};\nmsg.topic = \"homeassistant/\" + msg.domain + \"/\" + msg.entity_id + \"/update\";\nreturn msg;",
+		"func": "// Check if this is a computer entity\nif (msg.entity_id && msg.entity_id.startsWith(\"computer.\")) {\n    const computerName = msg.entity_id.split(\".\")[1].toLowerCase();\n    \n    // Create multiple MQTT messages for different computer attributes\n    const messages = [];\n    \n    // Session state\n    messages.push({\n        topic: `homeassistant/sensor/${computerName}/${computerName}_sessionstate/state`,\n        payload: msg.payload, // on/off/locked/unlocked\n        qos: 2\n    });\n    \n    // Current volume\n    if (msg.attributes.volume_level !== undefined) {\n        const volumeLevel = Math.round(msg.attributes.volume_level * 100);\n        messages.push({\n            topic: `homeassistant/sensor/${computerName}/${computerName}_currentvolume/state`,\n            payload: volumeLevel.toString(),\n            qos: 2\n        });\n    }\n    \n    // Active window\n    if (msg.attributes.activewindow !== undefined) {\n        messages.push({\n            topic: `homeassistant/sensor/${computerName}/${computerName}_activewindow/state`,\n            payload: msg.attributes.activewindow,\n            qos: 2\n        });\n    }\n    \n    // Enforce lock state\n    if (msg.attributes.enforce_lock !== undefined) {\n        messages.push({\n            topic: `homeassistant/switch/${computerName}/${computerName}_enforce_lock/state`,\n            payload: msg.attributes.enforce_lock ? \"ON\" : \"OFF\",\n            qos: 2\n        });\n    }\n    \n    return [messages];\n} else {\n    // Handle traditional entities (light and media_player)\n    msg.payload = {\n        \"entity_id\": msg.entity_id,\n        \"state\": msg.payload,\n        \"brightness\": msg.attributes.brightness || null,\n        \"hs_color\": msg.attributes.hs_color || null,\n        \"volume_level\": msg.attributes.volume_level || null,\n        \"source\": msg.attributes.source || null\n    };\n    msg.topic = \"homeassistant/\" + msg.domain + \"/\" + msg.entity_id + \"/update\";\n    return msg;\n}",
 		"outputs": 1,
 		"timeout": 0,
 		"noerr": 0,
@@ -710,10 +710,10 @@
 				"light.led_flood_light",
 				"media_player.lgnano_55",
 				"computer.felixlaptop",
-				"computer.neuralnet",
-				"computer.felixlaptop.volume",
-				"computer.felixlaptop.mute",
-				"computer.felixlaptop.enforce_lock"
+				"sensor.felixlaptop_felixlaptop_currentvolume",
+				"sensor.felixlaptop_felixlaptop_activewindow",
+				"sensor.felixlaptop_felixlaptop_sessionstate",
+				"switch.felixlaptop_felixlaptop_enforce_lock"
 			],
 			"substring": [],
 			"regex": []
@@ -762,7 +762,8 @@
 		"y": 560,
 		"wires": [
 			[
-				"509bc3efd8427eb2"
+				"509bc3efd8427eb2",
+				"8f3a918de72c3a17"
 			]
 		]
 	},
@@ -1147,5 +1148,403 @@
 		"willMsg": {},
 		"userProps": "",
 		"sessionExpiry": ""
+	},
+	{
+		"id": "be62a5d7f8a45c29",
+		"type": "mqtt in",
+		"z": "d8cfddba5c4a2613",
+		"name": "Computer Button Actions",
+		"topic": "homeassistant/button/+/+/press",
+		"qos": "2",
+		"datatype": "auto-detect",
+		"broker": "93e8dd50b41a1c38",
+		"nl": false,
+		"rap": false,
+		"inputs": 0,
+		"x": 110,
+		"y": 320,
+		"wires": [
+			[
+				"e3a891cef4531a27"
+			]
+		]
+	},
+	{
+		"id": "e3a891cef4531a27",
+		"type": "change",
+		"z": "d8cfddba5c4a2613",
+		"name": "Extract Computer Action",
+		"rules": [
+			{
+				"t": "set",
+				"p": "computerName",
+				"pt": "msg",
+				"to": "$split(topic, \"/\")[2]",
+				"tot": "jsonata"
+			},
+			{
+				"t": "set",
+				"p": "action",
+				"pt": "msg",
+				"to": "$split($split(topic, \"/\")[3], \"_\")[1]",
+				"tot": "jsonata"
+			}
+		],
+		"action": "",
+		"property": "",
+		"from": "",
+		"to": "",
+		"reg": false,
+		"x": 340,
+		"y": 320,
+		"wires": [
+			[
+				"0e9a63fe2c82a14f"
+			]
+		]
+	},
+	{
+		"id": "0e9a63fe2c82a14f",
+		"type": "switch",
+		"z": "d8cfddba5c4a2613",
+		"name": "Action Type",
+		"property": "action",
+		"propertyType": "msg",
+		"rules": [
+			{
+				"t": "eq",
+				"v": "lock",
+				"vt": "str"
+			},
+			{
+				"t": "eq",
+				"v": "mute",
+				"vt": "str"
+			}
+		],
+		"checkall": "false",
+		"repair": false,
+		"outputs": 2,
+		"x": 550,
+		"y": 320,
+		"wires": [
+			[
+				"51e8b3a79a82c109"
+			],
+			[
+				"6bcd829a1423e217"
+			]
+		]
+	},
+	{
+		"id": "51e8b3a79a82c109",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Prepare Lock Action",
+		"func": "msg.entity_id = \"computer.\" + msg.computerName;\nreturn msg;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 750,
+		"y": 280,
+		"wires": [
+			[
+				"80a17a97a77da1b0"
+			]
+		]
+	},
+	{
+		"id": "6bcd829a1423e217",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Prepare Mute Action",
+		"func": "msg.entity_id = \"computer.\" + msg.computerName;\nreturn msg;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 750,
+		"y": 320,
+		"wires": [
+			[
+				"23eb2d487e66fa9f"
+			]
+		]
+	},
+	{
+		"id": "fd93ef7c82a97f21",
+		"type": "mqtt in",
+		"z": "d8cfddba5c4a2613",
+		"name": "Volume Actions",
+		"topic": "homeassistant/button/+/+_setvolume/action",
+		"qos": "2",
+		"datatype": "auto-detect",
+		"broker": "93e8dd50b41a1c38",
+		"nl": false,
+		"rap": false,
+		"inputs": 0,
+		"x": 100,
+		"y": 380,
+		"wires": [
+			[
+				"7b8a23a9f4d2a128"
+			]
+		]
+	},
+	{
+		"id": "7b8a23a9f4d2a128",
+		"type": "change",
+		"z": "d8cfddba5c4a2613",
+		"name": "Extract Computer and Volume",
+		"rules": [
+			{
+				"t": "set",
+				"p": "computerName",
+				"pt": "msg",
+				"to": "$split(topic, \"/\")[2]",
+				"tot": "jsonata"
+			},
+			{
+				"t": "set",
+				"p": "volumeLevel",
+				"pt": "msg",
+				"to": "$number(payload)",
+				"tot": "jsonata"
+			}
+		],
+		"action": "",
+		"property": "",
+		"from": "",
+		"to": "",
+		"reg": false,
+		"x": 350,
+		"y": 380,
+		"wires": [
+			[
+				"3fa23cdf82a1d827"
+			]
+		]
+	},
+	{
+		"id": "3fa23cdf82a1d827",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Prepare Volume Action",
+		"func": "msg.entity_id = \"computer.\" + msg.computerName;\nmsg.payload = msg.volumeLevel / 100; // Convert to 0-1.0 range\nreturn msg;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 580,
+		"y": 380,
+		"wires": [
+			[
+				"0af2c78096e77150"
+			]
+		]
+	},
+	{
+		"id": "a9e7c3ef81a2d901",
+		"type": "mqtt in",
+		"z": "d8cfddba5c4a2613",
+		"name": "Power Actions",
+		"topic": "homeassistant/switch/+/+_power/set",
+		"qos": "2",
+		"datatype": "auto-detect",
+		"broker": "93e8dd50b41a1c38",
+		"nl": false,
+		"rap": false,
+		"inputs": 0,
+		"x": 100,
+		"y": 440,
+		"wires": [
+			[
+				"b2c71f3928a3e129"
+			]
+		]
+	},
+	{
+		"id": "b2c71f3928a3e129",
+		"type": "change",
+		"z": "d8cfddba5c4a2613",
+		"name": "Extract Computer and Power Action",
+		"rules": [
+			{
+				"t": "set",
+				"p": "computerName",
+				"pt": "msg",
+				"to": "$split(topic, \"/\")[2]",
+				"tot": "jsonata"
+			},
+			{
+				"t": "set",
+				"p": "powerState",
+				"pt": "msg",
+				"to": "payload",
+				"tot": "msg"
+			}
+		],
+		"action": "",
+		"property": "",
+		"from": "",
+		"to": "",
+		"reg": false,
+		"x": 350,
+		"y": 440,
+		"wires": [
+			[
+				"8e712fc391a2d817"
+			]
+		]
+	},
+	{
+		"id": "8e712fc391a2d817",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Prepare Power Action",
+		"func": "msg.entity_id = \"computer.\" + msg.computerName;\nmsg.payload = msg.powerState;\nreturn msg;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 580,
+		"y": 440,
+		"wires": [
+			[
+				"9245ffd4161179ba"
+			]
+		]
+	},
+	{
+		"id": "63a58e29a1b9d726",
+		"type": "mqtt in",
+		"z": "d8cfddba5c4a2613",
+		"name": "Enforce Lock Actions",
+		"topic": "homeassistant/switch/+/+_enforce_lock/set",
+		"qos": "2",
+		"datatype": "auto-detect",
+		"broker": "93e8dd50b41a1c38",
+		"nl": false,
+		"rap": false,
+		"inputs": 0,
+		"x": 120,
+		"y": 500,
+		"wires": [
+			[
+				"d82a7f192c8a1927"
+			]
+		]
+	},
+	{
+		"id": "d82a7f192c8a1927",
+		"type": "change",
+		"z": "d8cfddba5c4a2613",
+		"name": "Extract Computer and Lock Action",
+		"rules": [
+			{
+				"t": "set",
+				"p": "computerName",
+				"pt": "msg",
+				"to": "$split(topic, \"/\")[2]",
+				"tot": "jsonata"
+			},
+			{
+				"t": "set",
+				"p": "enforceLockState",
+				"pt": "msg",
+				"to": "payload",
+				"tot": "msg"
+			}
+		],
+		"action": "",
+		"property": "",
+		"from": "",
+		"to": "",
+		"reg": false,
+		"x": 350,
+		"y": 500,
+		"wires": [
+			[
+				"c82a9f192a87d128"
+			]
+		]
+	},
+	{
+		"id": "c82a9f192a87d128",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Prepare Enforce Lock Action",
+		"func": "msg.entity_id = \"computer.\" + msg.computerName;\nreturn msg;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 590,
+		"y": 500,
+		"wires": [
+			[
+				"a18d9f3c28a7d129"
+			]
+		]
+	},
+	{
+		"id": "a18d9f3c28a7d129",
+		"type": "api-call-service",
+		"z": "d8cfddba5c4a2613",
+		"name": "Set Enforce Lock",
+		"server": "c8bf64e0.ee9788",
+		"version": 7,
+		"debugenabled": false,
+		"action": "computer.set_enforce_lock",
+		"floorId": [],
+		"areaId": [],
+		"deviceId": [],
+		"entityId": [],
+		"labelId": [],
+		"data": "{\"entity_id\": $$.entity_id, \"enforce_lock\": $$.enforceLockState === \"ON\"}",
+		"dataType": "jsonata",
+		"mergeContext": "",
+		"mustacheAltTags": false,
+		"outputProperties": [],
+		"queue": "none",
+		"blockInputOverrides": true,
+		"domain": "computer",
+		"service": "set_enforce_lock",
+		"x": 790,
+		"y": 500,
+		"wires": [
+			[]
+		]
+	},
+	{
+		"id": "8f3a918de72c3a17",
+		"type": "function",
+		"z": "d8cfddba5c4a2613",
+		"name": "Process Computer Sensor Updates",
+		"func": "// Check if it's a direct format entity\nif (msg.entity_id && (msg.entity_id.includes('_currentvolume') || \n                      msg.entity_id.includes('_activewindow') || \n                      msg.entity_id.includes('_sessionstate') || \n                      msg.entity_id.includes('_enforce_lock'))) {\n    \n    // Extract computer name from entity ID\n    const parts = msg.entity_id.split('_');\n    const computerName = parts[0].split('.')[1];\n    \n    // Create the base topic path\n    let topic = '';\n    let payload = msg.payload;\n    \n    // Determine which type of sensor it is\n    if (msg.entity_id.includes('_currentvolume')) {\n        topic = `homeassistant/sensor/${computerName}/${computerName}_currentvolume/state`;\n    } else if (msg.entity_id.includes('_activewindow')) {\n        topic = `homeassistant/sensor/${computerName}/${computerName}_activewindow/state`;\n    } else if (msg.entity_id.includes('_sessionstate')) {\n        topic = `homeassistant/sensor/${computerName}/${computerName}_sessionstate/state`;\n    } else if (msg.entity_id.includes('_enforce_lock')) {\n        topic = `homeassistant/switch/${computerName}/${computerName}_enforce_lock/state`;\n        payload = msg.payload === 'on' ? 'ON' : 'OFF';\n    }\n    \n    if (topic) {\n        return {\n            topic: topic,\n            payload: payload,\n            qos: 2\n        };\n    }\n}\n\nreturn null;",
+		"outputs": 1,
+		"timeout": 0,
+		"noerr": 0,
+		"initialize": "",
+		"finalize": "",
+		"libs": [],
+		"x": 550,
+		"y": 600,
+		"wires": [
+			[
+				"87a328ed1f41e601"
+			]
+		]
 	}
 ]

@@ -75,20 +75,19 @@ void updateTopics() {
     topics.mute = "";
     topics.lock = "";
   } else if (strcmp(entity.domain, "computer") == 0) {
-    // Use the correct MQTT topic for computer integration
+    // Extract computer name from entity.entityId (format is "computer.computername")
     String computerName = String(entity.entityId).substring(String(entity.entityId).indexOf(".") + 1).toLowerCase();
-    String computerBase = "homeassistant/Computer/Computer." + computerName;
     
-    // Main entity topics
-    topics.command = computerBase + "/set";
-    topics.requestState = computerBase + "/request_state";
-    topics.update = computerBase + "/update";
+    // Use the direct MQTT format with button.computername_computername_*
+    topics.command = "homeassistant/switch/" + computerName + "/" + computerName + "_power/set";
+    topics.requestState = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state";
+    topics.update = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state";
     
-    // Helper entity topics - use proper entity ID format with dots
-    topics.volume = "homeassistant/number/computer." + computerName + ".volume/set";
-    topics.mute = "homeassistant/switch/computer." + computerName + ".mute/toggle";
-    topics.lock = "homeassistant/button/computer." + computerName + ".lock/press";
-    topics.enforceLock = "homeassistant/switch/computer." + computerName + ".enforce_lock/set";
+    // Helper entity topics using the direct format 
+    topics.volume = "homeassistant/button/" + computerName + "/" + computerName + "_setvolume/action";
+    topics.mute = "homeassistant/button/" + computerName + "/" + computerName + "_mute/press";
+    topics.lock = "homeassistant/button/" + computerName + "/" + computerName + "_lock/press";
+    topics.enforceLock = "homeassistant/switch/" + computerName + "/" + computerName + "_enforce_lock/set";
     
     topics.brightness = "";
     topics.hs = "";
@@ -483,28 +482,33 @@ void loop() {
         client.publish(topics.command.c_str(), "ON");
       } else {
         // Computer is on, toggle mute
-        Serial.print("Dial push detected, publishing mute command to ");
-        Serial.println(topics.mute);
-        client.publish(topics.mute.c_str(), "TOGGLE");
+        Serial.print("Dial push detected, publishing mute command");
+        toggleComputerMute();
       }
       delay(50);
     }
 
     if (currentBackButtonState != lastBackButtonState && currentBackButtonState == LOW) {
       // Back button: toggle enforce_lock
-      Serial.print("Back button press detected, toggling enforce lock via ");
-      Serial.println(topics.enforceLock);
+      Serial.print("Back button press detected, toggling enforce lock");
       bool currentEnforceLockState = (pcSessionState == "locked");
-      client.publish(topics.enforceLock.c_str(), currentEnforceLockState ? "OFF" : "ON");
+      toggleComputerEnforceLock(!currentEnforceLockState);
       delay(50);
     }
 
     // Back + rotary push: power off
     if (currentBackButtonState == LOW && currentPushButtonState == LOW) {
-      // Button + dial push: power off (send as set with payload OFF)
+      // Button + dial push: power off
       Serial.print("Back button + dial push detected, publishing power off command to ");
       Serial.println(topics.command);
       client.publish(topics.command.c_str(), "OFF");
+      delay(50);
+    }
+    
+    // Additional control: if the left button and back button are pressed together, lock the computer
+    if (currentLeftButtonState == LOW && currentBackButtonState == LOW) {
+      Serial.println("Left button + back button detected, locking computer");
+      toggleComputerLock();
       delay(50);
     }
   } else {
@@ -618,126 +622,173 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print(", payload: ");
   Serial.println(message);
 
+  String topicStr = String(topic);
   int entityIndex = -1;
-  for (int i = 0; i < numEntities; i++) {
-    String expectedUpdateTopic = String("homeassistant/") + entities[i].domain + "/" + entities[i].entityId + "/update";
-    if (String(topic) == expectedUpdateTopic) {
-      entityIndex = i;
-      break;
-    }
-  }
-
-  if (entityIndex == -1) {
-    Serial.println("Unknown topic, ignoring message");
-    return;
-  }
-
-  StaticJsonDocument<200> doc;
-  DeserializationError error = deserializeJson(doc, message);
-  if (error) {
-    Serial.print("deserializeJson() failed: ");
-    Serial.println(error.c_str());
-    return;
-  }
-
-  const char* entity_id = doc["entity_id"];
-  if (strcmp(entity_id, entities[entityIndex].entityId) != 0) {
-    Serial.println("Entity ID mismatch, ignoring message");
-    return;
-  }
-
-  const char* state = doc["state"];
-  if (state) {
-    entityStates[entityIndex] = (strcmp(state, "on") == 0);
-    Serial.print("State updated for ");
-    Serial.print(entity_id);
-    Serial.print(": ");
-    Serial.println(entityStates[entityIndex] ? "on" : "off");
-    if (entityIndex == currentEntityIndex) {
-      digitalWrite(buttonLedPin, entityStates[entityIndex]);
-      Serial.println("Updated button LED state");
-    }
-    stateReceived[entityIndex] = true;
-    Serial.print("State received for ");
-    Serial.println(entity_id);
-  }
-
-  const Entity& entity = entities[entityIndex];
-  if (strcmp(entity.domain, "light") == 0) {
-    if (doc.containsKey("brightness") && !doc["brightness"].isNull()) {
-      displayBrightness[entityIndex] = doc["brightness"].as<int>();
-      if (lastKnobActivity == 0) {
-        targetBrightness[entityIndex] = displayBrightness[entityIndex];
-      }
-      Serial.print("Brightness updated for ");
-      Serial.print(entity_id);
-      Serial.print(": ");
-      Serial.println(displayBrightness[entityIndex]);
-    }
-    if (doc.containsKey("hs_color") && !doc["hs_color"].isNull()) {
-      float h = doc["hs_color"][0].as<float>();
-      float s = doc["hs_color"][1].as<float>();
-      bool matched = false;
-      for (int i = 0; i < numColors; i++) {
-        if (abs(colors[i][0] - h) < 5 && abs(colors[i][1] - s) < 5) {
-          colorIndices[entityIndex] = i;
-          matched = true;
+  
+  // Check if it's a traditional format (light or media_player)
+  if (topicStr.startsWith("homeassistant/light/") || topicStr.startsWith("homeassistant/media_player/")) {
+    for (int i = 0; i < numEntities; i++) {
+      if (strcmp(entities[i].domain, "light") == 0 || strcmp(entities[i].domain, "media_player") == 0) {
+        String expectedUpdateTopic = String("homeassistant/") + entities[i].domain + "/" + entities[i].entityId + "/update";
+        if (topicStr == expectedUpdateTopic) {
+          entityIndex = i;
           break;
         }
       }
-      if (!matched) colorIndices[entityIndex] = 0;
-      Serial.print("HS color updated for ");
-      Serial.print(entity_id);
-      Serial.print(": ");
-      Serial.print(h);
-      Serial.print(",");
-      Serial.println(s);
     }
-  } else if (strcmp(entity.domain, "media_player") == 0 || strcmp(entity.domain, "computer") == 0) {
-    if (doc.containsKey("volume_level") && !doc["volume_level"].isNull()) {
-      volumeLevels[entityIndex] = (int)(doc["volume_level"].as<float>() * 100);
-      if (lastKnobActivity == 0) {
-        targetVolumeLevels[entityIndex] = volumeLevels[entityIndex];
+    
+    if (entityIndex != -1) {
+      // Process traditional format message with JSON
+      StaticJsonDocument<200> doc;
+      DeserializationError error = deserializeJson(doc, message);
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+        return;
       }
-      Serial.print("Volume level updated for ");
-      Serial.print(entity_id);
-      Serial.print(": ");
-      Serial.println(volumeLevels[entityIndex]);
-    }
-    if (strcmp(entity.domain, "media_player") == 0 && doc.containsKey("source") && !doc["source"].isNull()) {
-      const char* source = doc["source"];
-      for (int i = 0; i < numTvSources; i++) {
-        if (strcmp(source, tvSources[i]) == 0) {
-          currentTvSourceIndex = i;
-          currentTvTargetSourceIndex = -1;
-          break;
-        }
+      
+      const char* entity_id = doc["entity_id"];
+      if (strcmp(entity_id, entities[entityIndex].entityId) != 0) {
+        Serial.println("Entity ID mismatch, ignoring message");
+        return;
       }
-      Serial.print("Source updated for ");
-      Serial.print(entity_id);
-      Serial.print(": ");
-      Serial.println(source);
-    }
-    // computer-specific attributes
-    if (strcmp(entity.domain, "computer") == 0) {
-      if (doc.containsKey("activewindow") && !doc["activewindow"].isNull()) {
-        pcActiveWindow = doc["activewindow"].as<String>();
-        Serial.print("Active window updated for ");
+      
+      const char* state = doc["state"];
+      if (state) {
+        entityStates[entityIndex] = (strcmp(state, "on") == 0);
+        Serial.print("State updated for ");
         Serial.print(entity_id);
+        Serial.print(": ");
+        Serial.println(entityStates[entityIndex] ? "on" : "off");
+        if (entityIndex == currentEntityIndex) {
+          digitalWrite(buttonLedPin, entityStates[entityIndex]);
+          Serial.println("Updated button LED state");
+        }
+        stateReceived[entityIndex] = true;
+      }
+      
+      // Handle domain-specific attributes
+      const Entity& entity = entities[entityIndex];
+      if (strcmp(entity.domain, "light") == 0) {
+        if (doc.containsKey("brightness") && !doc["brightness"].isNull()) {
+          displayBrightness[entityIndex] = doc["brightness"].as<int>();
+          if (lastKnobActivity == 0) {
+            targetBrightness[entityIndex] = displayBrightness[entityIndex];
+          }
+          Serial.print("Brightness updated for ");
+          Serial.print(entity_id);
+          Serial.print(": ");
+          Serial.println(displayBrightness[entityIndex]);
+        }
+        if (doc.containsKey("hs_color") && !doc["hs_color"].isNull()) {
+          float h = doc["hs_color"][0].as<float>();
+          float s = doc["hs_color"][1].as<float>();
+          bool matched = false;
+          for (int i = 0; i < numColors; i++) {
+            if (abs(colors[i][0] - h) < 5 && abs(colors[i][1] - s) < 5) {
+              colorIndices[entityIndex] = i;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) colorIndices[entityIndex] = 0;
+          Serial.print("HS color updated for ");
+          Serial.print(entity_id);
+          Serial.print(": ");
+          Serial.print(h);
+          Serial.print(",");
+          Serial.println(s);
+        }
+      } else if (strcmp(entity.domain, "media_player") == 0) {
+        if (doc.containsKey("volume_level") && !doc["volume_level"].isNull()) {
+          volumeLevels[entityIndex] = (int)(doc["volume_level"].as<float>() * 100);
+          if (lastKnobActivity == 0) {
+            targetVolumeLevels[entityIndex] = volumeLevels[entityIndex];
+          }
+          Serial.print("Volume level updated for ");
+          Serial.print(entity_id);
+          Serial.print(": ");
+          Serial.println(volumeLevels[entityIndex]);
+        }
+        if (doc.containsKey("source") && !doc["source"].isNull()) {
+          const char* source = doc["source"];
+          for (int i = 0; i < numTvSources; i++) {
+            if (strcmp(source, tvSources[i]) == 0) {
+              currentTvSourceIndex = i;
+              currentTvTargetSourceIndex = -1;
+              break;
+            }
+          }
+          Serial.print("Source updated for ");
+          Serial.print(entity_id);
+          Serial.print(": ");
+          Serial.println(source);
+        }
+      }
+    }
+  } 
+  // Handle direct format messages for computer entities
+  else if (topicStr.contains("_sessionstate/state") || 
+           topicStr.contains("_activewindow/state") || 
+           topicStr.contains("_currentvolume/state") ||
+           topicStr.contains("_enforce_lock/state")) {
+    
+    // Extract computer name from topic
+    int firstSlash = topicStr.indexOf('/') + 1;
+    int secondSlash = topicStr.indexOf('/', firstSlash + 1);
+    int thirdSlash = topicStr.indexOf('/', secondSlash + 1);
+    String domainType = topicStr.substring(firstSlash, secondSlash);
+    String computerName = topicStr.substring(secondSlash + 1, thirdSlash);
+    computerName = computerName.substring(0, computerName.indexOf('_'));
+    
+    // Find matching entity
+    for (int i = 0; i < numEntities; i++) {
+      if (strcmp(entities[i].domain, "computer") == 0) {
+        String entityCompName = String(entities[i].entityId).substring(String(entities[i].entityId).indexOf(".") + 1).toLowerCase();
+        if (entityCompName == computerName) {
+          entityIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (entityIndex != -1) {
+      // Process based on the sensor type
+      if (topicStr.contains("_sessionstate/state")) {
+        pcSessionState = message;
+        entityStates[entityIndex] = (pcSessionState != "off");
+        stateReceived[entityIndex] = true;
+        Serial.print("Session state updated for computer ");
+        Serial.print(computerName);
+        Serial.print(": ");
+        Serial.println(pcSessionState);
+        
+        if (entityIndex == currentEntityIndex) {
+          digitalWrite(buttonLedPin, entityStates[entityIndex]);
+        }
+      }
+      else if (topicStr.contains("_activewindow/state")) {
+        pcActiveWindow = message;
+        Serial.print("Active window updated for computer ");
+        Serial.print(computerName);
         Serial.print(": ");
         Serial.println(pcActiveWindow);
       }
-      if (doc.containsKey("sessionstate") && !doc["sessionstate"].isNull()) {
-        pcSessionState = doc["sessionstate"].as<String>();
-        Serial.print("Session state updated for ");
-        Serial.print(entity_id);
+      else if (topicStr.contains("_currentvolume/state")) {
+        int volume = message.toInt();
+        volumeLevels[entityIndex] = volume;
+        if (lastKnobActivity == 0) {
+          targetVolumeLevels[entityIndex] = volumeLevels[entityIndex];
+        }
+        Serial.print("Volume updated for computer ");
+        Serial.print(computerName);
         Serial.print(": ");
-        Serial.println(pcSessionState);
+        Serial.println(volume);
       }
-      if (doc.containsKey("enforce_lock") && !doc["enforce_lock"].isNull()) {
-        bool enforceLockState = doc["enforce_lock"].as<bool>();
-        Serial.print("Enforce lock updated for ");
-        Serial.print(entity_id);
+      else if (topicStr.contains("_enforce_lock/state")) {
+        bool enforceLockState = (message == "ON" || message == "on");
+        Serial.print("Enforce lock updated for computer ");
+        Serial.print(computerName);
         Serial.print(": ");
         Serial.println(enforceLockState ? "enabled" : "disabled");
       }
@@ -761,11 +812,41 @@ void reconnect() {
     String clientId = "ESP32-" + String(random(0xffff), HEX);
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
       Serial.println("MQTT connected");
+      
+      // Subscribe to topics for all entities
       for (int i = 0; i < numEntities; i++) {
-        String subUpdateTopic = String("homeassistant/") + entities[i].domain + "/" + entities[i].entityId + "/update";
-        client.subscribe(subUpdateTopic.c_str());
-        Serial.print("Subscribed to: ");
-        Serial.println(subUpdateTopic);
+        if (strcmp(entities[i].domain, "light") == 0 || strcmp(entities[i].domain, "media_player") == 0) {
+          // Traditional format for lights and media players
+          String subUpdateTopic = String("homeassistant/") + entities[i].domain + "/" + entities[i].entityId + "/update";
+          client.subscribe(subUpdateTopic.c_str());
+          Serial.print("Subscribed to: ");
+          Serial.println(subUpdateTopic);
+        } 
+        else if (strcmp(entities[i].domain, "computer") == 0) {
+          // Direct format for computers
+          String computerName = String(entities[i].entityId).substring(String(entities[i].entityId).indexOf(".") + 1).toLowerCase();
+          
+          // Subscribe to state topics
+          String sessionStateTopic = "homeassistant/sensor/" + computerName + "/" + computerName + "_sessionstate/state";
+          client.subscribe(sessionStateTopic.c_str());
+          Serial.print("Subscribed to: ");
+          Serial.println(sessionStateTopic);
+          
+          String activeWindowTopic = "homeassistant/sensor/" + computerName + "/" + computerName + "_activewindow/state";
+          client.subscribe(activeWindowTopic.c_str());
+          Serial.print("Subscribed to: ");
+          Serial.println(activeWindowTopic);
+          
+          String currentVolumeTopic = "homeassistant/sensor/" + computerName + "/" + computerName + "_currentvolume/state";
+          client.subscribe(currentVolumeTopic.c_str());
+          Serial.print("Subscribed to: ");
+          Serial.println(currentVolumeTopic);
+          
+          String enforceLockTopic = "homeassistant/switch/" + computerName + "/" + computerName + "_enforce_lock/state";
+          client.subscribe(enforceLockTopic.c_str());
+          Serial.print("Subscribed to: ");
+          Serial.println(enforceLockTopic);
+        }
       }
     } else {
       Serial.print("MQTT connection failed, rc=");
@@ -819,16 +900,36 @@ void publishVolume() {
     Serial.println("publishVolume skipped: OLED not attached or not connected");
     return;
   }
-  String payload = String(targetVolumeLevels[currentEntityIndex]); // Send as 0-100 for number entity
-  Serial.print("Publishing volume to ");
-  Serial.print(topics.volume);
-  Serial.print(": ");
-  Serial.println(payload);
-  client.publish(topics.volume.c_str(), payload.c_str());
-  if (!entityStates[currentEntityIndex]) {
-    entityStates[currentEntityIndex] = true;
-    Serial.println("Entity state set to ON due to volume change");
-    toggleEntity(HIGH);
+  
+  const Entity& entity = entities[currentEntityIndex];
+  
+  // Handle volume differently for computer vs media player
+  if (strcmp(entity.domain, "computer") == 0) {
+    // For computer, send the volume value as the payload
+    String payload = String(targetVolumeLevels[currentEntityIndex]);
+    Serial.print("Publishing volume to ");
+    Serial.print(topics.volume);
+    Serial.print(": ");
+    Serial.println(payload);
+    client.publish(topics.volume.c_str(), payload.c_str());
+    
+    // No need to turn on the computer for volume changes
+    // as volume control should work regardless of power state
+  } else {
+    // For media players, send as 0-1.0 float
+    float volumeFloat = targetVolumeLevels[currentEntityIndex] / 100.0;
+    String payload = String(volumeFloat, 2);
+    Serial.print("Publishing volume to ");
+    Serial.print(topics.volume);
+    Serial.print(": ");
+    Serial.println(payload);
+    client.publish(topics.volume.c_str(), payload.c_str());
+    
+    if (!entityStates[currentEntityIndex]) {
+      entityStates[currentEntityIndex] = true;
+      Serial.println("Entity state set to ON due to volume change");
+      toggleEntity(HIGH);
+    }
   }
 }
 
@@ -865,6 +966,51 @@ void toggleEntity(bool currentBackButtonState) {
   Serial.print(": ");
   Serial.println(payload);
   client.publish(topics.command.c_str(), payload.c_str());
+}
+
+void toggleComputerLock() {
+  if (!oledAttached || !connected) {
+    Serial.println("toggleComputerLock skipped: OLED not attached or not connected");
+    return;
+  }
+  
+  const Entity& entity = entities[currentEntityIndex];
+  if (strcmp(entity.domain, "computer") == 0) {
+    Serial.print("Publishing lock command to ");
+    Serial.println(topics.lock);
+    client.publish(topics.lock.c_str(), "PRESS");
+  }
+}
+
+void toggleComputerMute() {
+  if (!oledAttached || !connected) {
+    Serial.println("toggleComputerMute skipped: OLED not attached or not connected");
+    return;
+  }
+  
+  const Entity& entity = entities[currentEntityIndex];
+  if (strcmp(entity.domain, "computer") == 0) {
+    Serial.print("Publishing mute command to ");
+    Serial.println(topics.mute);
+    client.publish(topics.mute.c_str(), "PRESS");
+  }
+}
+
+void toggleComputerEnforceLock(bool enforce) {
+  if (!oledAttached || !connected) {
+    Serial.println("toggleComputerEnforceLock skipped: OLED not attached or not connected");
+    return;
+  }
+  
+  const Entity& entity = entities[currentEntityIndex];
+  if (strcmp(entity.domain, "computer") == 0) {
+    String payload = enforce ? "ON" : "OFF";
+    Serial.print("Publishing enforce lock command to ");
+    Serial.print(topics.enforceLock);
+    Serial.print(": ");
+    Serial.println(payload);
+    client.publish(topics.enforceLock.c_str(), payload.c_str());
+  }
 }
 
 void updateDisplay() {
